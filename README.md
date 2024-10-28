@@ -35,4 +35,4 @@ One is a desktop app similar to discord with an accompanying android app. It wil
 That means, if you didn't want to rely on one person hosting your chat app, you could always just host it yourself.
 
 ## Would you like to know more?
-Visit the wiki section! :)
+Visit the wiki section! :) (Wiki will be populated once code is published. Forgot to mention. Sorry!)
