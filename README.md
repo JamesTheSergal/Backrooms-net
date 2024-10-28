@@ -36,3 +36,8 @@ That means, if you didn't want to rely on one person hosting your chat app, you 
 
 ## Would you like to know more?
 Visit the wiki section! :) (Wiki will be populated once code is published. Forgot to mention. Sorry!)
+
+### People who have helped so far
+These people have helped by making suggestions on stream or helped find vulnerabilities. - 
+- The Gray Hatter - https://gr.ht/ - "For security... Don't lie, unless you can lie convincingly." (Web Server Spoofing suggestions)
+- innitfuN1 - Twitch - Brought up the Riemann hypothesis as a way to attack RSA.
