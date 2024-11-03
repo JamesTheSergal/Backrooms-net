@@ -136,6 +136,7 @@ class brWebServer:
 
             self.emptyPacket = False
             self.packetSize = len(packetBytes)
+            self.totalSize = self.packetSize # Will be used as total measure including if we have post data
             self.bodyData = b''
             self.headers = {}
 
@@ -291,6 +292,7 @@ class brWebServer:
                 
                 self.bodyData = currentBytes
                 self.refConnection.setblocking(True)
+                self.totalSize = self.packetSize + len(self.bodyData)
                 logger.debug("Receive finished.")
                 
     class route:
@@ -384,6 +386,14 @@ class brWebServer:
         # server state flags
         self.running = False
         self.shutdown = False
+        # ------------
+
+        # Stats
+        self.statsLock = threading.Lock()
+        self.handledIncomingBytes = 0
+        self.handledOutgoingBytes = 0
+        self.respondedToRequests = 0
+        self.errors = 0
         # ------------
 
     def buildRoute(self, routeType:str, virtualPath:str, virtualResponder:object|None=None, physicalPath:str=""):
@@ -541,6 +551,10 @@ class brWebServer:
         netPort = address[1]
         debugCount = 0
         debugID = uuid.uuid4()
+        ourHandledBytes = 0
+        ourOutgoingBytes = 0
+        ourHandledRequests = 0
+        ourErrors = 0
 
         # Make sure we do a Thread Safe lock! 
         with self.thrLock:
@@ -570,6 +584,7 @@ class brWebServer:
                 logger.exception("Critical error when processing client packet!", exc_info=True)
                 brWebServer.__debugToFile__(rawpacket, debugID, debugCount)
                 debugCount+= 1
+                ourErrors+= 1
                 packet = self.__handleServerError__()
 
             # See if we need to hand to router
@@ -577,16 +592,24 @@ class brWebServer:
                 logger.debug("Received an empty packet. Client disconnect.")
                 connection.close()
                 break
+
+            if parsingResult.getRequestedConnectionType():
+                logger.debug(parsingResult.getRequestedConnectionType())
             #---
 
             # Hand off to router to get the full reply
             try:
                 reply = self.__router__(parsingResult)
+
+                # After we go through the router, we should be able to get an accurate measure of bytes handled
+                ourHandledBytes += parsingResult.totalSize
+
                 packet = reply.setBodySize().buildPacket()
             except Exception as e:
                 logger.exception("Critical error when processing request!", exc_info=True)
                 brWebServer.__debugToFile__(rawpacket, debugID, debugCount)
                 debugCount+= 1
+                ourErrors+= 1
                 packet = self.__handleServerError__()
 
 
@@ -595,6 +618,8 @@ class brWebServer:
             brWebServer.__debugToFile__(packet, debugID, debugCount)
             debugCount += 1
             connection.sendall(packet)
+            ourHandledRequests+= 1
+            ourOutgoingBytes+= len(packet)
             
 
         
@@ -606,6 +631,17 @@ class brWebServer:
                 logger.info(f'Thread shutting down - Handled {debugCount} packets.')
             else:
                 logger.info(f'Thread shutting down.')
+        
+        # Publish our stats really quick
+        with self.statsLock:
+            self.handledIncomingBytes += ourHandledBytes
+            self.handledOutgoingBytes += ourOutgoingBytes
+            self.respondedToRequests += ourHandledRequests
+            self.errors += ourErrors
+
+        with self.thrLock:
+            self.connections.remove(connection)
+
 
 
 class brWebPage:

@@ -15,7 +15,12 @@ BR_VERSION = "0.0.1-alpha"
 RESPONDER_PORT = 80
 
 
-
+def publishWebServerStats(localenc:enc.enclave, webServer: brWebCore.brWebServer):
+    localenc.updateEntry("brWebCore_errors", webServer.errors)
+    localenc.updateEntry("brWebCore_incomingBytes", webServer.handledIncomingBytes)
+    localenc.updateEntry("brWebCore_outgoingBytes", webServer.handledOutgoingBytes)
+    localenc.updateEntry("brWebCore_requests", webServer.respondedToRequests)
+    localenc.updateEntry("brWebCore_connections", len(webServer.connections))
 
 def node():
 
@@ -43,7 +48,11 @@ def node():
 
     try:
         while True:
-            time.sleep(0.2)
+            time.sleep(5)
+            # Publish web server stats to enclave
+            publishWebServerStats(localenc, webServer)
+            
+
     except KeyboardInterrupt:
         logging.info("Got keyboard inturrupt.")
         webServer.shutdown = True
