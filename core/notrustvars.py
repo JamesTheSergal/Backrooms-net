@@ -440,20 +440,33 @@ class enclave:
 
         return True
     
-    #def checkIfExist(self, key, obj):
-        #if key in 
-
-    def insertData(self, key, obj):
+    def isEncKey(self, key):
         with self.__threadLock:
-            self.__data[key] = obj
+            if key in self.__data.keys():
+                return True
+            else:
+                return False
+            
+    def updateEntry(self, key, obj, create=True):
+        if self.isEncKey(key) or create==True:
+            with self.__threadLock:
+                self.__data[key] = obj
+        else:
+            raise enclave.enclaveValueDoesNotExist(key)
         return True
+            
+    def insertData(self, key, obj):
+        if not self.isEncKey(key):
+            with self.__threadLock:
+                self.__data[key] = obj
+            return True
+        else:
+            raise enclave.enclaveValueExists(key)
     
     def returnData(self, key):
-        try:
+        if self.isEncKey(key):
             with self.__threadLock:
                 requested = self.__data[key]
-        except KeyError:
-            logging.error("Requested key from Enclave does not exist. Debug log level has the key.")
-            logging.debug(f'Key requested {key=} {len(self.__data)} entries')
-            return None
+        else:
+            raise enclave.enclaveValueDoesNotExist(key)
         return requested
