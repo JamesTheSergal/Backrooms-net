@@ -7,7 +7,6 @@ import uuid
 import os
 from chardet.universaldetector import UniversalDetector
 import mimetypes
-import logging
 from core import loggingfactory
 
 logger = loggingfactory.createNewLogger("brWebCore")
