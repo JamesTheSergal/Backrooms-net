@@ -40,8 +40,11 @@ def node():
 
     # Setup our webCore
     webServer = brWebCore.brWebServer(debug=True)
-    brWebUI = brWebElements.brWebUIModule()
+    brWebUI = brWebElements.brWebUIModule(localenc)
     webServer.buildRoute(webServer.route.GET_ROUTE, "/", brWebUI.brUIRoot)
+    webServer.buildRoute(webServer.route.GET_ROUTE, "/stats", brWebUI.statsPage)
+    webServer.buildRoute(webServer.route.GET_ROUTE, "/pubkey", brWebUI.ourPublicKey)
+    webServer.buildRoute(webServer.route.GET_ROUTE, "/requestuuid", brWebUI.clientGetUUID4)
     webServer.buildRoute(webServer.route.GET_ROUTE, "/announce", brWebUI.brAnnounce)
     webServer.buildRoute(webServer.route.POST_ROUTE, "/announce/publickey", brWebUI.brAnnouncePost)
     webServer.startServer()

@@ -1,7 +1,9 @@
 from core.brWebCore import brWebServer
 from core.brWebCore import brWebPage
+from core.notrustvars import enclave
 from node import BR_VERSION
 import threading
+import uuid
 
 def genHeader():
         content = (
@@ -11,15 +13,27 @@ def genHeader():
             '<meta name="twitter:description" content="A secure node based communications network.">\n'
             "</head>\n"
             "<html>\n"
-            "<h1>Hello from the backrooms!&nbsp;</h1>\n"
-            "<hr />\n"
         )
         return content
+
+def genNavBar(links:dict={}):
+    navContent = (
+        "<h1>Hello from the backrooms!&nbsp;</h1>\n" 
+        "<p>\n"
+    )
+
+    for key in links.keys():
+        navContent += f'<a href="{links[key]}">{key}</a>&nbsp;'
+    navContent += "\n"
+    navContent += "</p>\n"
+    navContent += "<hr />\n"
     
-def genBody():
+    return navContent
+     
+def genBody(internalContent):
     content = (
         "<body>\n"
-        "<p>The node is up and running! Good job!</p>"
+        + internalContent +
         "</body>\n"
     )
     return content
@@ -54,15 +68,26 @@ def genFileForm(postEndpoint, formName, dataName, formButtonText):
 
 class brWebUIModule(brWebPage):
 
-    def __init__(self) -> None:
+    def __init__(self, secureEnclave: enclave) -> None:
         brWebPage.__init__(self)
         super().__init__()
+        self.secureEnclave = secureEnclave # Threading locks are already implemented in the Enclave
         pass
 
     def brUIRoot(self, context: brWebServer.packetParser):
         self.addContent(
             genHeader() +
-            genBody() +
+            genBody(
+                genNavBar(
+                      {
+                        "Our Public Key": "/pubkey",
+                        "Open Insecure Route": "/insecureannounce",
+                        "Open Secure Route": "/announce",
+                        "Stats": "/stats",
+                      }
+                ) +
+                f'Welcome to the backrooms!\n'
+            ) +
             genFooter()
         )
         self.setOK()
@@ -77,8 +102,46 @@ class brWebUIModule(brWebPage):
     def brAnnounce(self, context: brWebServer.packetParser):
         self.addContent(
             genHeader() +
+            genNavBar() +
             genForm("/announce/publickey", "Your Public Key", "client-pub-key", "Submit") +
             genFileForm("/announce/publickey", "Or a public key file", "client-pub-key", "Submit") +
+            genFooter()
+        )
+        self.setOK()
+        return self.buildResponse(context)
+    
+    def clientGetUUID4(self, context: brWebServer.packetParser):
+         self.addContent(
+              str(uuid.uuid4())
+         )
+         self.setOK()
+         return self.buildResponse(context)
+
+    def ourPublicKey(self, context: brWebServer.packetParser):
+        pubkey = self.secureEnclave.returnData("PublicKey")
+        self.addContent(
+            str(pubkey.save_pkcs1())
+        )
+        self.setOK()
+        return self.buildResponse(context)
+    
+    def statsPage(self, context: brWebServer.packetParser):
+        inBytes = self.secureEnclave.returnData("brWebCore_incomingBytes")
+        outBytes = self.secureEnclave.returnData("brWebCore_outgoingBytes")
+        requests = self.secureEnclave.returnData("brWebCore_requests")
+        errors = self.secureEnclave.returnData("brWebCore_errors")
+        connections = self.secureEnclave.returnData("brWebCore_connections")
+
+        self.addContent(
+            genHeader() +
+            genNavBar() +
+            genBody(
+                 f'<p>We have handled {inBytes} Bytes/In</p>\n' +
+                 f'<p>We have handled {outBytes} Bytes/Out</p>\n' +
+                 f'<p>We have handled {requests} Requests</p>\n' +
+                 f'<p>We have had {errors} Errors</p>\n' +
+                 f'<p>We currently have {connections} Connections</p>\n'
+            ) +
             genFooter()
         )
         self.setOK()
