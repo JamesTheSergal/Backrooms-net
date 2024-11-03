@@ -20,7 +20,7 @@ class brWebServer:
         pass
 
     class brEncodingConfidenceLow(brWebServerException):
-        """Exception raised when a route is invalid"""
+        """Exception raised when we can't deturmine the encoding of a packet"""
 
         def __init__(self, reason) -> None:
             self.message = "Low confidence in detected charset"
@@ -267,24 +267,24 @@ class brWebServer:
             
         def getRemainderOfPostData(self):
             currentBytes = self.bodyData
-            logging.debug(f'Starting receive POST data with {len(currentBytes)} Bytes')
+            logger.debug(f'Starting receive POST data with {len(currentBytes)} Bytes')
 
-            logging.debug(f'Post: {self.isPost()} and Content-length: {self.getContentLength()}')
+            logger.debug(f'Post: {self.isPost()} and Content-length: {self.getContentLength()}')
 
             self.refConnection.setblocking(False)
 
             if self.isPost() and self.getContentLength():
                 expectedLength = self.getContentLength()+4 # Add four because our actual data is not inclusive of dataBody bytes
-                logging.debug(f'Evaluate -> {self.bodyDataLength} != {expectedLength}')
+                logger.debug(f'Evaluate -> {self.bodyDataLength} != {expectedLength}')
                 while self.bodyDataLength != expectedLength:
-                    logging.debug(f'Bytes Needed: {expectedLength} - Current Bytes: {self.bodyDataLength} - Diff: {expectedLength-self.bodyDataLength}')
+                    logger.debug(f'Bytes Needed: {expectedLength} - Current Bytes: {self.bodyDataLength} - Diff: {expectedLength-self.bodyDataLength}')
 
                     try:
                         msg = self.refConnection.recv(1024)
                         if not msg:
                             break
                     except BlockingIOError:
-                        logging.warning("Didn't receive a last message. Finishing.")
+                        logger.warning("Didn't receive a last message. Finishing.")
                         break
                         
                     currentBytes += msg
@@ -292,7 +292,7 @@ class brWebServer:
                 
                 self.bodyData = currentBytes
                 self.refConnection.setblocking(True)
-                logging.debug("Receive finished.")
+                logger.debug("Receive finished.")
                 
     class route:
 
