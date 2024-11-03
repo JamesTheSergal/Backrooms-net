@@ -1,12 +1,11 @@
 # Backrooms-net
 A secure node based communications network.
-(Work in progress - Once I do my final audit of the code, it will be published)
+
+(Work in progress - Check dev branch for current progress)
 
 ## What is Backrooms-net?
-Backrooms-net is a project that I had envisioned while I was in highschool, but put down since I didn't have enough programming knowlege to pull it off.
-Backrooms-net at it's core is meant to accept data from a client, encrypt and ensure a safe route to another client while communicating in a node based network.
-I am currently unhappy with the state of Tor, and other companies providing VPNs that ultimately spy on all of your traffic anyways. I am also particularly unhappy
-with several central governments spending lots of time and money to track it's citizens and deanonymize services we use.
+Backrooms-net is a project that I had envisioned while I was in highschool, but put down since I didn't have enough programming knowledge to pull it off.
+Backrooms-net is meant to be a communications network. It will encrypt communications from one client to another and ensure safe transit of your data. Every endpoint is a "client" and clients can be services as well with the main idea that no client will know exactly how the data got there, only that is has traveled through the network of nodes and has not been tampered with.
 
 ## Backrooms-net features
 - Dual layer full AES and RSA encryption of at rest persistence data
@@ -39,5 +38,6 @@ Visit the wiki section! :) (Wiki will be populated once code is published. Forgo
 
 ### People who have helped so far
 These people have helped by making suggestions on stream or helped find vulnerabilities. - 
+- rmgleon - https://github.com/rmgleon
 - The Gray Hatter - https://gr.ht/ - "For security... Don't lie, unless you can lie convincingly." (Web Server Spoofing suggestions)
 - innitfuN1 - Twitch - Brought up the Riemann hypothesis as a way to attack RSA.
