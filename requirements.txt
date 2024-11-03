@@ -1,0 +1,4 @@
+chardet==5.2.0
+cryptography==43.0.3
+Requests==2.32.3
+rsa==4.9
