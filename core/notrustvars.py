@@ -66,7 +66,30 @@ class enclave:
 
         def __str__(self):
             return f"{self.message}\n{pprint.pprint(self.data)}"
+    
+    class enclaveValueExists(enclaveException):
+        """This exception is raised when there is already an existing key in the enclave."""
+
+        def __init__(self, key) -> None:
+            self.message = "Key already exists in enclave data ->"
+            self.key = key
+            super().__init__(self.key)
+
+        def __str__(self):
+            return f"{self.message} {self.key}"
         
+    class enclaveValueDoesNotExist(enclaveException):
+        """This exception is raised when there is not a key in the enclave that matches our requested value"""
+
+        def __init__(self, key) -> None:
+            self.message = "Key does not exist in enclave data ->"
+            self.key = key
+            super().__init__(self.key)
+
+        def __str__(self):
+            return f"{self.message} {self.key}"
+
+
     class security:
         """Base security class for Backrooms Enclaves.
         """
