@@ -1,9 +1,32 @@
 from core.brWebCore import brWebServer
 from core.brWebCore import brWebPage
 from core.notrustvars import enclave
+from core.loggingfactory import timeProfiler
 from node import BR_VERSION
 import threading
 import uuid
+
+
+# I did not write this
+# Code is from: https://stackoverflow.com/questions/12523586/python-format-size-application-converting-b-to-kb-mb-gb-tb
+def humanbytes(B):
+    """Return the given bytes as a human friendly KB, MB, GB, or TB string."""
+    B = float(B)
+    KB = float(1024)
+    MB = float(KB ** 2) # 1,048,576
+    GB = float(KB ** 3) # 1,073,741,824
+    TB = float(KB ** 4) # 1,099,511,627,776
+
+    if B < KB:
+        return '{0} {1}'.format(B,'Bytes' if 0 == B > 1 else 'Byte')
+    elif KB <= B < MB:
+        return '{0:.2f} KB'.format(B / KB)
+    elif MB <= B < GB:
+        return '{0:.2f} MB'.format(B / MB)
+    elif GB <= B < TB:
+        return '{0:.2f} GB'.format(B / GB)
+    elif TB <= B:
+        return '{0:.2f} TB'.format(B / TB)
 
 def genHeader():
         content = (
@@ -137,8 +160,8 @@ class brWebUIModule(brWebPage):
             genHeader() +
             genNavBar() +
             genBody(
-                 f'<p>We have handled {inBytes} Bytes/In</p>\n' +
-                 f'<p>We have handled {outBytes} Bytes/Out</p>\n' +
+                 f'<p>We have handled {humanbytes(inBytes)} In</p>\n' +
+                 f'<p>We have handled {humanbytes(outBytes)} Out</p>\n' +
                  f'<p>We have handled {requests} Requests</p>\n' +
                  f'<p>We have had {errors} Errors</p>\n' +
                  f'<p>We currently have {connections} Connections</p>\n'
