@@ -267,24 +267,17 @@ class brWebServer:
             
         def getRemainderOfPostData(self):
             currentBytes = self.bodyData
-            logger.debug(f'Starting receive POST data with {len(currentBytes)} Bytes')
-
-            logger.debug(f'Post: {self.isPost()} and Content-length: {self.getContentLength()}')
-
             self.refConnection.setblocking(False)
 
             if self.isPost() and self.getContentLength():
                 expectedLength = self.getContentLength()+4 # Add four because our actual data is not inclusive of dataBody bytes
-                logger.debug(f'Evaluate -> {self.bodyDataLength} != {expectedLength}')
                 while self.bodyDataLength != expectedLength:
-                    logger.debug(f'Bytes Needed: {expectedLength} - Current Bytes: {self.bodyDataLength} - Diff: {expectedLength-self.bodyDataLength}')
-
                     try:
                         msg = self.refConnection.recv(1024)
                         if not msg:
                             break
                     except BlockingIOError:
-                        logger.warning("Didn't receive a last message. Finishing.")
+                        logger.warning(f'Did not receive last message when receiving post data. Expected Bytes: {expectedLength} Got: {self.bodyDataLength}')
                         break
                         
                     currentBytes += msg
@@ -293,7 +286,7 @@ class brWebServer:
                 self.bodyData = currentBytes
                 self.refConnection.setblocking(True)
                 self.totalSize = self.packetSize + len(self.bodyData)
-                logger.debug("Receive finished.")
+                logger.debug("Post receive finished.")
                 
     class route:
 
@@ -592,9 +585,12 @@ class brWebServer:
                 logger.debug("Received an empty packet. Client disconnect.")
                 connection.close()
                 break
-
-            if parsingResult.getRequestedConnectionType():
-                logger.debug(parsingResult.getRequestedConnectionType())
+            
+            #---# El_Casi #---# - Backrooms-net didn't respect client wishes
+            if parsingResult.getRequestedConnectionType() == brWebServer.requestResponse.CLOSE_CONN:
+                logger.debug("Client requested connection to close. Closing connection.")
+                connection.close()
+                break
             #---
 
             # Hand off to router to get the full reply
