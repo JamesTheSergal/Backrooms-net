@@ -58,10 +58,10 @@ def node():
 
     except KeyboardInterrupt:
         logging.info("Got keyboard inturrupt.")
-        webServer.shutdown = True
+        webServer.shutdownServer()
+        publishWebServerStats(localenc, webServer)
         logging.info("Saving persistence data...")
         localenc.saveEnclaveFile(overwrite=True)
-        webServer.shutdownServer()
         logging.info("Main thread exiting...")
     
     
