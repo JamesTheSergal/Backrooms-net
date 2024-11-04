@@ -1,9 +1,10 @@
 import logging
+from pathlib import Path
 import socket
 import os
 import threading
 import uuid
-from core import notrustvars
+from core import loggingfactory, notrustvars
 
 # Backrooms-net route types and levels
 
@@ -32,89 +33,198 @@ from core import notrustvars
 
 
 
-class nodeNetworkController:
+logger = loggingfactory.createNewLogger("brWebCore")
 
-    def __init__(self, backlog, bindaddr, port, secureEnclave: notrustvars.enclave, debug: bool) -> None:
-        self.backlog = backlog
-        self.bindaddr = bindaddr
-        self.port = port
-        self.secureEnclave = secureEnclave
-        self.nodeRunning = False
-        self.shutdownSignal = False
+
+class brNodeServer:
+
+    class brNodeServerException(Exception):
+        """Exception base class for the brWebServer."""
+        pass
+
+    def __init__(self, secureEnclave:notrustvars.enclave, bindAddress:str="127.0.0.1", nodePort:int=443, debug=False) -> None:
+
+        # If debug is set, we will log at the lowest level + debug timings
         self.debug = debug
+        # ------------
 
+        # Network setup
+        self.bindAddress = bindAddress
+        self.nodePort = nodePort
+        # ------------
+
+        # Connection Pool
         self.connections = []
-        self.connAcceptThread = None
+        # ------------
 
-    def startNode(self):
-        self.connAcceptThread = threading.Thread(name="connAcceptThread", target=self.__nodeLoop__, args=[]).start()
+        # Threads
+        self.mainThread:threading.Thread = None
+        self.webThreads:list[threading.Thread] = []
+        self.thrLock = threading.Lock()
+        # ------------
 
-    def __nodeLoop__(self):
-        logging.info("Started main node loop for accepting connections...")
-        self.nodeRunning = True
+        # server state flags
+        self.running = False
+        self.shutdown = False
+        # ------------
+
+        # Stats
+        self.statsLock = threading.Lock()
+        self.handledIncomingBytes = 0
+        self.handledOutgoingBytes = 0
+        self.respondedToRequests = 0
+        self.errors = 0
+        # ------------
+
+
+    def startServer(self):
+        logger.info("Started node server.")
+        if not self.running:
+            self.mainThread = threading.Thread(name="brNodeNetworkeMain", target=self.__mainLoop__, args=[])
+            self.mainThread.start()
+
+    def shutdownServer(self):
+        self.shutdown = True
+        logger.info("Sent shutdown signal - Node Main Thread is now waiting...")
+        self.mainThread.join()
+
+    def __mainLoop__(self):
+        self.running = True
 
         try:
             soc = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            soc.bind((self.bindaddr, self.port))
-            soc.listen(self.backlog)
+            soc.bind((self.bindAddress, self.nodePort))
+            soc.listen(4)
             soc.settimeout(1.0)
         except Exception as e:
-            logging.exception("Error occured when creating socket!", exc_info=True)
-            self.nodeRunning = False
+            logger.exception("Error occured when creating socket!", exc_info=True)
+            self.running = False
             return
         
-        while self.shutdownSignal is False:
+        while self.shutdown is False:
             try:
-                socket_connection, address = soc.accept()
-                logging.info("Accepting connection from client...")
-                #connections.append(socket_connection)
-                threading.Thread(target=self.node, args=[socket_connection, address]).start()
-                #logging.info(f'Active connections: {len(connections)}')
+                connection, address = soc.accept()
+                spawnThread = threading.Thread(target=self.__connectionThread__, args=[connection, address])
+                self.webThreads.append(spawnThread)
+                spawnThread.start()
             except socket.timeout:
-                # This is a normal timeout that let's us check for the shutdown signal
-                pass
+                # This is normal. It gives us time to loop and check threads.
+
+                deadThreads = []
+                for thr in self.webThreads:
+                    if not thr.is_alive():
+                        deadThreads.append(thr)
+
+                for thr in deadThreads:
+                    self.webThreads.remove(thr)
+        
+        # Broke out of loop. We must be shutting down.
+        logger.info("Main Node loop received shutdown, refusing new connections.")
+        logger.info(f'Waiting for {len(self.webThreads)} threads to shutdown...')
+
+        while len(self.webThreads) > 0:
+            logger.info(f'Waiting for {len(self.webThreads)} threads to shutdown...')
+            for thr in self.webThreads:
+                thr.join(timeout=5.0)
+                if not thr.is_alive():
+                    logger.info(f'Thread {thr.native_id} shutdown...')
+                    self.webThreads.remove(thr)
+                
+        logger.info("All threads closed. Exiting main loop.")
+
+    def __debugToFile__(data: bytes, id, count):
+        tempdir = Path(f'temp/{id}')
+        if not tempdir.is_dir():
+            os.mkdir(f'temp/{id}')
+        with open(f'temp/{id}/{str(count)}.packet', 'ab') as df:
+            df.write(data)
+        logger.debug(f'Wrote packet to: temp/{id}/{str(count)}.packet')
+
+    def __connectionThread__(self, connection: socket.socket, address):
+
+        netAddress = address[0]
+        netPort = address[1]
+        debugCount = 0
+        debugID = uuid.uuid4()
+        ourHandledBytes = 0
+        ourOutgoingBytes = 0
+        ourHandledRequests = 0
+        ourErrors = 0
+
+        # Make sure we do a Thread Safe lock! 
+        with self.thrLock:
+            self.connections.append(connection)
+        
+        logger.info(f'Accepted connection from {netAddress}:{netPort}')
+
+        while not self.shutdown:
+
+            # Attempt to receive data and handle issues
+            try:
+                rawpacket = connection.recv(1024)
+            except:
+                break
+            # Finished handling exceptions
+
+            if self.debug:
+                brNodeServer.__debugToFile__(rawpacket, debugID, debugCount)
+                debugCount += 1
+
+            # Processing here --
+
+            # Parse the packet to get key details
+            try:
+                parsingResult = brNodeServer.packetParser(connection, rawpacket)
+            except Exception as e:
+                logger.exception("Critical error when processing client packet!", exc_info=True)
+                brNodeServer.__debugToFile__(rawpacket, debugID, debugCount)
+                debugCount+= 1
+                ourErrors+= 1
+                packet = self.__handleServerError__()
+
+            # Hand off to router to get the full reply
+            try:
+                reply = self.__router__(parsingResult)
+
+                # After we go through the router, we should be able to get an accurate measure of bytes handled
+                ourHandledBytes += parsingResult.totalSize
+
+                packet = reply.setBodySize().buildPacket()
+            except Exception as e:
+                logger.exception("Critical error when processing request!", exc_info=True)
+                brNodeServer.__debugToFile__(rawpacket, debugID, debugCount)
+                debugCount+= 1
+                ourErrors+= 1
+                packet = self.__handleServerError__()
+
+
+            # End of processing
+
+            brNodeServer.__debugToFile__(packet, debugID, debugCount)
+            debugCount += 1
+            connection.sendall(packet)
+            ourHandledRequests+= 1
+            ourOutgoingBytes+= len(packet)
             
 
-        if self.shutdownSignal is True:
-            logging.info("Node loop got shutdown signal. Shutting down...")
-            #soc.close()
-            #logging.info("Closed socket.")
-            self.nodeRunning = False
-                
-    def node(self, connection: socket.socket, address):
-        logging.debug("Starting webresponder connection thread...")
-
-        # Append our connection for accurate count
-        self.connections.append(connection)
-
-        # Main Responder loop
-
-        while self.shutdownSignal is False:
-            try:
-                
-                msg = connection.recv(1024)
-
-                
-                connection.sendall(packet)
-
-            except TimeoutError:
-                logging.error("Timeout! Closed connection...")
-                break
-            except ConnectionResetError:
-                logging.exception("Connection force close!", exc_info=True)
-                break
-            except Exception as e:
-                logging.exception(f'Error while handling responder connection!', exc_info=True)
-                break
-
-
-    def remove_connection(self, conn: socket.socket):
-        if conn in self.connections:
-            conn.close()
-            self.connections.remove(conn)
-            logging.debug(f'Removed connection. Active connections: {len(self.connections)}')
+        
+        # We broke out, find out why!
+        if self.shutdown:
+            logger.info("Thread got shutdown signal.")
         else:
-            logging.error(f'Attempted to close a connection that does not exist!!! Active connections: {len(self.connections)}')
+            if self.debug:
+                logger.info(f'Thread shutting down - Handled {debugCount} packets.')
+            else:
+                logger.info(f'Thread shutting down.')
+        
+        # Publish our stats really quick
+        with self.statsLock:
+            self.handledIncomingBytes += ourHandledBytes
+            self.handledOutgoingBytes += ourOutgoingBytes
+            self.respondedToRequests += ourHandledRequests
+            self.errors += ourErrors
 
+        with self.thrLock:
+            self.connections.remove(connection)
 
 
