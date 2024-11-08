@@ -5,6 +5,7 @@ import os
 import threading
 import uuid
 from core import loggingfactory, notrustvars
+from node import BR_VERSION
 
 # Backrooms-net route types and levels
 
@@ -35,6 +36,13 @@ from core import loggingfactory, notrustvars
 
 logger = loggingfactory.createNewLogger("brWebCore")
 
+class brPacket:
+
+    def __init__(self, receivedPacket:bytes=None) -> None:
+        if receivedPacket:
+            pass
+        else:
+            pass
 
 class brNodeServer:
 
