@@ -1,3 +1,4 @@
+from enum import IntEnum
 import logging
 from pathlib import Path
 import socket
@@ -32,17 +33,60 @@ from node import BR_VERSION
 #               (No Identification)
 # Client A (UUID4) --- HOPS --- Client B (UUID4)
 
+# Backrooms message types and explations
+#
+# 1. Challenge - We have received the public key of the connecting party
+# We will give them a random number to decrypt (16 Bytes)
+#
+# 2. Challenge response - We just send the number back using the originators public key
+#
+# 3. Ask For Friends - Simply ask for friends
+#
+# 4. Friend announce - One friend per message
+#
+# 5. Connection Test - Blank secure message to test latency
+#
+# 6. Message from client
 
 
-logger = loggingfactory.createNewLogger("brWebCore")
+
+logger = loggingfactory.createNewLogger("brNodeNetwork")
 
 class brPacket:
 
+    class brMessageType(IntEnum):
+        INTRODUCE = 0
+        CHALLENGE = 1
+        CHALLENGE_RES = 2
+        ASK_FOR_FRIENDS = 3
+        FRIEND_ANNOUNCE = 4
+        CONN_TEST = 5
+        MESSAGE = 6
+
     def __init__(self, receivedPacket:bytes=None) -> None:
-        if receivedPacket:
+        if receivedPacket is not None:
             pass
         else:
             pass
+
+        self.messageType:int = None
+        self.version:str = BR_VERSION
+        self.altIP: str = None
+        self.altPub: str = None
+        self.toClient: str = None
+        self.fromClient: str = None
+    
+    def setMessageType(self, msgdesc:int):
+        if msgdesc in brPacket.brMessageType:
+            self.messageType = msgdesc
+            return self
+        else:
+            pass # Raise exception 
+    
+
+    
+        
+
 
 class brNodeServer:
 
