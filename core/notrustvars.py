@@ -388,7 +388,11 @@ class enclave:
             with open(self.dirpath + self.enclaveName + ".kf", "rb") as kf:
                 self.assignedIdentity = enclave.security.identity()
                 encryptedPair:tuple = pickle.load(kf)
-                self.assignedIdentity.privateKey = pickle.loads(enclave.security.decryptLocalData(encryptedPair[1], encryptedPair[0], self.__salt))
+                try:
+                    self.assignedIdentity.privateKey = pickle.loads(enclave.security.decryptLocalData(encryptedPair[1], encryptedPair[0], self.__salt))
+                except pickle.UnpicklingError:
+                    logging.exception("Unable to decrypt enclave file! System changed/data corrupt/vector missing. Your data is not recoverable!", exc_info=True)
+                    exit()
                 self.assignedIdentity.lockIdentity()
 
             with open(location, 'rb') as ef:
