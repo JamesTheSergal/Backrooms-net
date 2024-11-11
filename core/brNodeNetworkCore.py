@@ -1,6 +1,7 @@
 from enum import IntEnum
 import logging
 from pathlib import Path
+import pprint
 import socket
 import os
 import threading
@@ -54,6 +55,53 @@ logger = loggingfactory.createNewLogger("brNodeNetwork")
 
 class brPacket:
 
+    class backroomsProtocolException(Exception):
+        pass
+
+    class brPacketOversize(backroomsProtocolException):
+        """Exception is raised when the packet is larger than the max allowed by the protocol."""
+
+        def __init__(self, data) -> None:
+            self.message = "Backrooms Protocol violation. Data is oversized. (Overflow? Security Violation?) (Data Involved) ->"
+            self.data = data
+            super().__init__(self.message)
+
+        def __str__(self):
+            return f"{self.message}\n{pprint.pprint(self.data)}"
+        
+    class brInvalidMessageType(backroomsProtocolException):
+        """Exception raised when an invalid message type is invoked."""
+
+        def __init__(self, data) -> None:
+            self.message = "Backrooms Protocol violation. Invalid message type! (Data Involved) ->"
+            self.data = data
+            super().__init__(self.message)
+
+        def __str__(self):
+            return f"{self.message}\n{pprint.pprint(self.data)}"
+        
+    class brInvalidVersion(backroomsProtocolException):
+        """Exception raised when an invalid version format is used."""
+
+        def __init__(self, data) -> None:
+            self.message = "Backrooms Protocol violation. Invalid version format! Ensure size is not exceeded! (Data Involved) ->"
+            self.data = data
+            super().__init__(self.message)
+
+        def __str__(self):
+            return f"{self.message}\n{pprint.pprint(self.data)}"
+        
+    class brPreFlightCheckFailure(backroomsProtocolException):
+        """Exception raised when a preflight check for the packet fails."""
+
+        def __init__(self, data) -> None:
+            self.message = "Backrooms Protocol violation. Pre-Flight check failed! (Data Involved) ->"
+            self.data = data
+            super().__init__(self.message)
+
+        def __str__(self):
+            return f"{self.message}\n{pprint.pprint(self.data)}"
+
     class brMessageType(IntEnum):
         INTRODUCE = 0
         CHALLENGE = 1
@@ -61,7 +109,8 @@ class brPacket:
         ASK_FOR_FRIENDS = 3
         FRIEND_ANNOUNCE = 4
         CONN_TEST = 5
-        MESSAGE = 6
+        CALLBACK_PING = 6 # Absolute Solver
+        MESSAGE = 7
 
     def __init__(self, receivedPacket:bytes=None) -> None:
         if receivedPacket is not None:
@@ -75,6 +124,7 @@ class brPacket:
         self.altPub: str = None
         self.toClient: str = None
         self.fromClient: str = None
+        self.data: bytes = None
     
     def setMessageType(self, msgdesc:int):
         if msgdesc in brPacket.brMessageType:
@@ -82,6 +132,22 @@ class brPacket:
             return self
         else:
             pass # Raise exception 
+
+    def buildPacket(self):
+        messageType = self.messageType.to_bytes(1, byteorder='little')
+        version = self.version.encode("utf-8")
+        altIP = self.altIP.encode("utf-8")
+        toClient = self.toClient.encode("utf-8")
+        fromClient = self.fromClient.encode("utf-8")
+
+        # Pre-flight check
+
+        if len(messageType) != 1:
+            raise brPacket.brInvalidMessageType(f'Message type data: {messageType}')
+
+
+        packet = messageType + version + altIP + toClient + fromClient
+        return packet
     
 
     

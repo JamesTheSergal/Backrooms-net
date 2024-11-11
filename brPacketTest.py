@@ -25,9 +25,14 @@ altIP = bytes(altAddress.encode("utf-8"))
 pubReturn = bytes(publicKey.encode("utf-8"))
 
 packet = msgtype + version + altIP + pubReturn
-
+print("Full packet: ")
+print(f"Length: {len(packet)}")
 print(pprint.pformat(packet.hex(" ", 1)))
-print(len(packet))
+print(f"Max length of messagetype: {len(msgtype)}")
+print(f"Max length of version: {len(version)}")
+print(f"Max length of return address: {len(altAddress)}")
+print(f"Max length of toclient: {len(altAddress)}")
+print(f"Max length of fromclient: {len(altAddress)}")
+print(f"Max length of pubkey: {len(altAddress)}")
 
-with open("debug.packet", 'wb') as f:
-    f.write(packet)
+
