@@ -235,6 +235,10 @@ class enclave:
             machineDerivedKey = kdf.derive(identifier.encode("utf-8"))
             return machineDerivedKey
 
+        def getMachineSHA256():
+            identifier, idHash = enclave.security.__getMachineIdentity__()
+            return idHash
+
         def encryptLocalData(dataObj, salt):
             """Uses AES to encrypt data using the System's unique key.
 
