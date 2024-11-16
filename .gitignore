@@ -167,3 +167,4 @@ cython_debug/
 /venv
 /core/__pycache__
 node.log
+BR.conf

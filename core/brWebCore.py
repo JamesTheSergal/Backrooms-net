@@ -389,6 +389,9 @@ class brWebServer:
         self.errors = 0
         # ------------
 
+        if debug:
+            logger.level = logging.DEBUG
+
     def buildRoute(self, routeType:str, virtualPath:str, virtualResponder:object|None=None, physicalPath:str=""):
 
         if routeType == brWebServer.route.GET_ROUTE:

@@ -1,19 +1,20 @@
 import logging
 import time
 
-logging.basicConfig(
-        encoding="utf-8",
-        format="{asctime}.{msecs} - [{thread} {module}.{funcName}:({lineno})] - [{levelname}] - {message}",
-        style="{",
-        datefmt="%Y-%m-%d %H:%M:%S",
-        level=logging.DEBUG,
-        handlers=[
-            logging.FileHandler("node.log", mode='a'),
-            logging.StreamHandler()
-        ]
-)
+def setDefault():
+    logging.basicConfig(
+            encoding="utf-8",
+            format="{asctime}.{msecs} - [{thread} {module}.{funcName}:({lineno})] - [{levelname}] - {message}",
+            style="{",
+            datefmt="%Y-%m-%d %H:%M:%S",
+            level=logging.INFO,
+            handlers=[
+                logging.FileHandler("node.log", mode='a'),
+                logging.StreamHandler()
+            ]
+    )
 
-def createNewLogger(name, path="./"):
+def createNewLogger(name, path="./", level=logging.DEBUG):
 
     defaultformat = logging.Formatter(
         "{asctime}.{msecs} - [{thread} {module}.{funcName}:({lineno})] - [{levelname}] - {message}",
@@ -25,7 +26,7 @@ def createNewLogger(name, path="./"):
     if name not in logging.Logger.manager.loggerDict:
         logger = logging.getLogger(name)
 
-        logger.setLevel(logging.DEBUG)
+        logger.setLevel(level)
         logger.propagate = False
 
         file_handler = logging.FileHandler(f'{path+name}.log', mode='a')
