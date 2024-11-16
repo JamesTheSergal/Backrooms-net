@@ -9,10 +9,10 @@ from core import notrustvars as enc
 from core import brWebCore
 from core import brWebElements
 from core import consolefancy
+from core import settings
 
 
 BR_VERSION = "0.0.1-alpha"
-RESPONDER_PORT = 80
 
 
 def publishWebServerStats(localenc:enc.enclave, webServer: brWebCore.brWebServer):
@@ -26,20 +26,56 @@ def node():
 
     # Print our fancy thing
     consolefancy.printstartfancy(BR_VERSION)
-
+    loggingfactory.setDefault()
     logging.info("Node initilization...")
+
+    # Load our settings
+    nodeSettings = settings.brSettings()
+
+    if not nodeSettings.settingsExisted:
+        logging.warning("Settings did not exist on startup. 'BR.conf' has been created. Please check the values and restart.")
+        exit()
+    else:
+        pass
+
+    # Get key values we need for webserver and application
+    webservAddress = nodeSettings.getStrSetting('network', 'bind-address')
+    webPort = nodeSettings.getIntSetting('network', 'webresponder-port')
+    debug = nodeSettings.getBoolSetting('security', 'debug')
+    enclName = nodeSettings.getStrSetting('security', 'enclave-name')
+    anonlog = nodeSettings.getStrSetting('security', 'anon-logging')
+
+    # Run several tests on settings
+
+    if debug:
+        logging.warning("Debug is set to TRUE! (ONLY DO THIS IF YOU KNOW WHAT YOU ARE DOING!!!)")
+        logging.basicConfig(level=logging.DEBUG)
+    else:
+        logging.basicConfig(level=logging.INFO)
+
+    if debug == True and anonlog == True:
+        logging.critical(
+            "\n---- WARNING ----\n"
+            "Using DEBUG mode and using the anonymous logging mode at the same time can log data that\n"
+            "could be used to identify your machine! Please reconsider! (Thanks for the logs tho)\n"
+            "---- WARNING ----\n"
+        )
+        time.sleep(8)
     
-    tempfile = Path(f'temp/000_default.encl')
+    # Final info printout of settings
+    logging.info(f"Backrooms configured to run a webserver on: {webservAddress}:{webPort}")
+    
+    tempfile = Path(f'temp/{enclName}.encl')
 
     if tempfile.is_file():
-        localenc = enc.enclave("000_default")
+        localenc = enc.enclave(enclName)
     else:
-        localenc = enc.enclave("000_default", True)
+        localenc = enc.enclave(enclName, True)
 
     logging.info("Enclave loaded...")
 
     # Setup our webCore
-    webServer = brWebCore.brWebServer(debug=True)
+    webServer = brWebCore.brWebServer(bindAddress=webservAddress, httpPort=webPort, debug=debug)
     brWebUI = brWebElements.brWebUIModule(localenc)
     webServer.buildRoute(webServer.route.GET_ROUTE, "/", brWebUI.brUIRoot)
     webServer.buildRoute(webServer.route.GET_ROUTE, "/stats", brWebUI.statsPage)
@@ -48,6 +84,13 @@ def node():
     webServer.buildRoute(webServer.route.GET_ROUTE, "/announce", brWebUI.brAnnounce)
     webServer.buildRoute(webServer.route.POST_ROUTE, "/announce/publickey", brWebUI.brAnnouncePost)
     webServer.startServer()
+    time.sleep(5)
+
+    if not webServer.running:
+        logging.error("Webserver hasn't opened in the expected time! Exiting main thread...")
+        logging.info("Saving persistence data...")
+        localenc.saveEnclaveFile(overwrite=True)
+        exit()
 
     try:
         while True:
