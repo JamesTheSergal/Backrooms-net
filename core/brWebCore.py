@@ -454,6 +454,17 @@ class brWebServer:
             soc.bind((self.bindAddress, self.httpPort))
             soc.listen(4)
             soc.settimeout(1.0)
+        except PermissionError:
+            # May be system reserved port on Linux
+            if self.httpPort < 1024:
+                logger.exception("Error with permissions! Some Linux distros don't allow binding to ports below 1024, or possible other error!", exc_info=True)
+                self.running = False
+                return
+            # Or it isn't. Oops.
+            else:
+                logger.exception("Error binding to port! Permissions error!", exc_info=True)
+                self.running = False
+                return
         except Exception as e:
             logger.exception("Error occured when creating socket!", exc_info=True)
             self.running = False
