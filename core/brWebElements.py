@@ -143,9 +143,7 @@ class brWebUIModule(brWebPage):
     def ourPublicKey(self, context: brWebServer.packetParser):
         pubkey = self.secureEnclave.returnData("PublicKey")
         strkey = pubkey.save_pkcs1().decode('utf-8')
-        self.addContent(
-            f'<body><p>{strkey}</p></body>'
-        )
+        self.addContent(strkey)
         self.setOK()
         return self.buildResponse(context)
     

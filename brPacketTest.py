@@ -1,6 +1,6 @@
 import pprint
 
-messageType = 255
+messageType = 0
 BR_VERSION = "00.00.01-alpha"
 altAddress = "000.000.000.000:65535"
 toClient = "21c29bbb-0e2b-4180-a0b6-70a8a669c4cc"
@@ -34,5 +34,12 @@ print(f"Max length of return address: {len(altAddress)}")
 print(f"Max length of toclient: {len(altAddress)}")
 print(f"Max length of fromclient: {len(altAddress)}")
 print(f"Max length of pubkey: {len(altAddress)}")
+
+from core.brNodeNetworkCore import brPacket
+
+parseResult = brPacket(packet)
+parseResult.setMessageVersion("0.0.1-alpha")
+
+print("Good!")
 
 

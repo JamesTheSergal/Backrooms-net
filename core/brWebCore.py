@@ -491,7 +491,7 @@ class brWebServer:
                     self.webThreads.remove(thr)
         
         # Broke out of loop. We must be shutting down.
-        logger.info("Main loop received shutdown, refusing new connections.")
+        logger.info("Main web loop received shutdown, refusing new connections.")
         logger.info(f'Waiting for {len(self.webThreads)} threads to shutdown...')
 
         while len(self.webThreads) > 0:

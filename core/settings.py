@@ -11,7 +11,9 @@ class brSettings():
             settings = configparser.ConfigParser()
             settings['network'] = {
                 'bind-address': '127.0.0.1',
-                'webresponder-port': 80
+                'webresponder-port': 80,
+                'brNode-port': 443,
+                'friendly-node-name': 'autogen'
             }
             settings['security'] = {
                 'debug': True,
@@ -31,6 +33,7 @@ class brSettings():
             self.settingsObj = settings
 
     def getStrSetting(self, cfgsection:str, item:str):
+        #TODO: Add exception for config parser NoOptionError
         return self.settingsObj.get(cfgsection, item)
     
     def getIntSetting(self, cfgsection:str, item:str):

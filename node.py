@@ -7,6 +7,7 @@ import hashlib
 from core import loggingfactory
 from core import notrustvars as enc
 from core import brWebCore
+from core import brNodeNetworkCore
 from core import brWebElements
 from core import consolefancy
 from core import settings
@@ -41,6 +42,8 @@ def node():
     # Get key values we need for webserver and application
     webservAddress = nodeSettings.getStrSetting('network', 'bind-address')
     webPort = nodeSettings.getIntSetting('network', 'webresponder-port')
+    brNodePort = nodeSettings.getIntSetting('network', 'brNode-port')
+    friendlyName = nodeSettings.getStrSetting('network', 'friendly-node-name')
     debug = nodeSettings.getBoolSetting('security', 'debug')
     enclName = nodeSettings.getStrSetting('security', 'enclave-name')
     anonlog = nodeSettings.getStrSetting('security', 'anon-logging')
@@ -64,6 +67,7 @@ def node():
     
     # Final info printout of settings
     logging.info(f"Backrooms configured to run a webserver on: {webservAddress}:{webPort}")
+    logging.info(f"Node name: {friendlyName}")
     
     tempfile = Path(f'temp/{enclName}.encl')
 
@@ -86,6 +90,9 @@ def node():
     webServer.startServer()
     time.sleep(5)
 
+    nodeServer = brNodeNetworkCore.brNodeServer(localenc, webservAddress, brNodePort, debug)
+    nodeServer.startServer()
+
     if not webServer.running:
         logging.error("Webserver hasn't opened in the expected time! Exiting main thread...")
         logging.info("Saving persistence data...")
@@ -102,6 +109,7 @@ def node():
     except KeyboardInterrupt:
         logging.info("Got keyboard inturrupt.")
         webServer.shutdownServer()
+        nodeServer.shutdownServer()
         publishWebServerStats(localenc, webServer)
         logging.info("Saving persistence data...")
         localenc.saveEnclaveFile(overwrite=True)

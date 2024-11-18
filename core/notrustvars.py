@@ -196,6 +196,13 @@ class enclave:
                 else:
                     logging.error("Attempted to unlock Identity in the unlocked state!")
 
+            def newIdentFromPubImport(keyData:str):
+                newPub = rsa.PublicKey.load_pkcs1(keyData.encode('utf-8'))
+                newIdent = enclave.security.identity()
+                newIdent.publicKey = newPub
+                return newIdent
+
+
         def __getMachineIdentity__():
             """Generates a unique identifier for the current machine using the (MAC-SystemType-SystemDomainName)
             This is used to verify the system's identity and derive a decryption key.
