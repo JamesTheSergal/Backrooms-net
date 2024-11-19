@@ -2,6 +2,7 @@ from enum import IntEnum
 import logging
 from pathlib import Path
 import pprint
+import random
 import socket
 import os
 import threading
@@ -110,11 +111,13 @@ class brPacket:
         INTRODUCE = 0
         CHALLENGE = 1
         CHALLENGE_RES = 2
-        ASK_FOR_FRIENDS = 3
-        FRIEND_ANNOUNCE = 4
-        CALLBACK_PING = 5 # Absolute Solver
-        READY_MESSAGE = 6
-        MESSAGE = 7
+        ENCR_COMMS = 3      # Sent when nodes finally upgrade to encrypted communications
+        ASK_FOR_FRIENDS = 4
+        FRIEND_ANNOUNCE = 5
+        PING = 6
+        CALLBACK_PING = 7   # Absolute Solver - Used to provide a window for response
+        READY_MESSAGE = 8
+        MESSAGE = 9
 
     def __init__(self, receivedPacket:bytes=None) -> None:
 
@@ -134,7 +137,10 @@ class brPacket:
             self.altPub: str = None
             self.toClient: str = None
             self.fromClient: str = None
-            self.data: bytes = None
+            self.data: bytes = b''
+        # Check packet type and extract data from packet related to its type
+        if self.messageType == brPacket.brMessageType.CHALLENGE:
+            self.data = receivedPacket[16:]
 
     def setMessageType(self, msgdesc:int):
         if msgdesc in brPacket.brMessageType:
@@ -155,7 +161,7 @@ class brPacket:
             raise brPacket.brInvalidMessageType(f'Message type data: {messageType}')
 
 
-        packet = messageType + version
+        packet = messageType + version + self.data
         return packet
     
 class brNodeRecord:
@@ -164,27 +170,92 @@ class brNodeRecord:
         self.nodeIP:str = None
         self.nodePort:int = 443
         self.webPort:int = 80
-        self.identity: notrustvars.enclave.security.identity
+        self.identity: notrustvars.enclave.security.identity = None
+        self.friendlyName = "Unknown"
         self.lastLatency = 0
         self.connected = False
         self.finishedHandshake = False
+        self.firstSeen = time.time()
 
     def queryPubKey(self):
         if self.nodeIP:
-            logger.debug(f"Requesting public key from {self.nodeIP}")
+            requestURL = f'http://{self.nodeIP}:{str(self.webPort)}/pubkey'
+            logger.debug(f"Requesting public key from {requestURL}")
             try:
-                response = requests.get(f'http://{self.nodeIP}:{self.webPort}/pubkey')
+                response = requests.get(url=requestURL, )
             except:
-                logger.error("Python Requests exception when requesting public key...")
+                logger.exception("Python Requests exception when requesting public key...", exc_info=True)
                 return False
             if response.status_code != 200:
                 return False
             nodeident = notrustvars.enclave.security.identity.newIdentFromPubImport(response.text)
             self.identity = nodeident
+            logger.debug("Public key has been imported successfully.")
             return True
         else:
             logger.error("IP of node not set. Cannot get pubkey. (Check the code)")
             return False
+        
+    def setNodeAddress(self, addressTupl:tuple):
+        self.nodeIP = addressTupl[0]
+        self.nodePort = addressTupl[1]
+
+class brRoute:
+
+    class brRouteType(IntEnum):
+        CONTROL = 0
+        TEST = 1
+        UNENCRYPTED = 2
+        ENCRYPTED = 3
+        ONION = 4
+        HIGHWAY = 5
+
+    def __init__(self, routeType:brRouteType, assignedConnection:socket.socket, thirdParty:brNodeRecord):
+        self.routeType = routeType 
+        self.routeSecret = random.randrange(0, 1000000)
+        self.assignedConn:socket.socket = assignedConnection # Our thread or some such
+        self.connThread: threading.Thread = None
+        self.thirdParty:brNodeRecord = thirdParty # Would be the node Record 
+        self.routeThreadLock = threading.Lock()
+        self.timeToLive = 0
+        self.encryptionUpgraded = False
+
+        # If we are a hop, we won't know these
+        self.connectingFrom = None # Client on our end we are connecting
+        self.connectingTo = None # Would be the client specifically we created this route for
+
+        # Connection updates
+        self.newNews = False
+        self.news = []
+        self.newIncoming = False
+        self.inbox = []
+        self.newOutgoing = False
+        self.outbox = []
+        self.routeState = "Unknown"
+
+    def isHandShakeComplete(self):
+        return self.thirdParty.finishedHandshake
+    
+    def setHandShakeComplete(self):
+        logger.debug(f'Handshake with {self.thirdParty.nodeIP} complete.')
+        self.thirdParty.finishedHandshake = True
+        self.encryptionUpgraded = True
+
+    def thirdPartyPubKeyCheck(self):
+        # Just make sure we have the other parties Public key.
+        if self.thirdParty.identity == None:
+            if self.thirdParty.queryPubKey():
+                return True
+            else:
+                return False
+        else:
+            return True
+                
+    def setRouteStateIdle(self):
+        self.routeState = "Idle"
+
+    def setRouteStateBusy(self):
+        self.routeState = "Busy"
 
     
 class brNodeServer:
@@ -209,12 +280,25 @@ class brNodeServer:
         # ------------
 
         # Connection Pool
-        self.pendingConnect:list[brNodeRecord] = [] # pending outgoing connections - Not inbound
-        self.inboundConnections = []
-        self.outboundConnections = []
+        self.pendingConnect:list[brRoute] = [] # pending outgoing connections - Not inbound
+        self.failedToConnect:list[brRoute] = []
+        self.inTesting:list[brRoute] = []
+        self.controlRoutes:list[brRoute] = []
+        self.activeRoutes:list[brRoute] = []
+        self.shutdownRoutes:list[brRoute] = []
+        # ------------
+
+        # Network controller specific
+        self.ourClients = {}
+        self.knownClients = {}
+        self.globalAnnounce:list = []
+        # Controller Notes
+        # Keys in Enclave:
+        # knownNodes
         # ------------
 
         # Threads
+        self.controllerThread:threading.Thread = None
         self.inboundThread:threading.Thread = None
         self.outboundThread:threading.Thread = None
         self.inboundNodeThreads:list[threading.Thread] = []
@@ -222,7 +306,7 @@ class brNodeServer:
         self.thrLock = threading.Lock()
         # ------------
 
-        # server state flags
+        # Server state flags
         self.running = False
         self.shutdown = False
         # ------------
@@ -236,57 +320,12 @@ class brNodeServer:
         # ------------
 
     def startServer(self):
-
-        if not self.secureEnclave.isEncKey("knownNodes"):
-
-            # Lets get our hostname + IP to make sure we don't add ourselves to the seed list
-            hostname = socket.gethostname()
-            usIP = socket.gethostbyname(hostname)
-
-            primer = []
-            if Path('core/seedservers.txt').is_file():
-                with open('core/seedservers.txt') as file:
-                    for line in file:
-
-                        linesplit = line.split(":")
-
-                        if len(linesplit) == 3:
-                            ip = linesplit[0]
-                            webport = int(linesplit[1])
-                            port = int(linesplit[2])
-                        else:
-                            ip = line
-                            webport = 80
-                            port = 443
-
-                        try:
-                            socket.inet_aton(ip) # Will fail if it isn't a proper IP address
-                            newNodeObject = brNodeRecord()
-                            newNodeObject.nodeIP = ip
-                            newNodeObject.nodePort = port
-                            newNodeObject.webPort = webport
-                            if newNodeObject.queryPubKey():  # TODO: Add check - and ip != usIP
-                                primer.append(newNodeObject)
-                            else:
-                                logger.error(f'Seed server {ip} did not respond correctly when we asked for their public key. (Security Issue?)')
-                        except:
-                            logger.error(f'A line in the seedservers list is not a valid IP address or seed server. -> {line}')
-                self.secureEnclave.insertData("knownNodes", primer)
-                logger.info("Primed nodes list for new node setup.")
-        
-        else:
-            nodeList:list[brNodeRecord] = self.secureEnclave.returnData("knownNodes")
-            for node in nodeList:
-                node.connected = False
-                node.lastLatency = 0
-                self.pendingConnect.append(node)
-            logger.info(f'Will reconnect to {len(nodeList)} known nodes on startup...')
-            
-
         logger.info("Started node server.")
         if not self.running:
+            self.controllerThread = threading.Thread(name="brNetworkController", target=self.__networkController__, args=[])
             self.inboundThread = threading.Thread(name="brNodeNetworkInbound", target=self.__inboundLoop__, args=[])
             self.outboundThread = threading.Thread(name="brNodeNetworkOutbound", target=self.__outboundLoop__, args=[])
+            self.controllerThread.start()
             self.inboundThread.start()
             self.outboundThread.start()
 
@@ -295,6 +334,7 @@ class brNodeServer:
         logger.info("Sent shutdown signal - Node Main Thread is now waiting...")
         self.inboundThread.join()
         self.outboundThread.join()
+        self.controllerThread.join()
 
     def __inboundLoop__(self):
         self.running = True
@@ -314,10 +354,15 @@ class brNodeServer:
             # Handle incoming first
             try:
                 connection, address = soc.accept()
-                tempNode = brNodeRecord()
-                tempNode.nodeIP = address
-                spawnThread = threading.Thread(name=f'brNodeCon-inbound-({address})',target=self.__connectionThread__, args=[tempNode, connection, address, "inbound"])
+
+                pendingNode = brNodeRecord()
+                pendingNode.setNodeAddress(address)
+
+                pendingRoute = brRoute(brRoute.brRouteType.TEST, connection, pendingNode)
+
+                spawnThread = threading.Thread(name=f'brNodeCon-inbound-({address})',target=self.__connectionThread__, args=[pendingRoute, "inbound"])
                 self.inboundNodeThreads.append(spawnThread)
+                self.inTesting.append(pendingRoute)
                 spawnThread.start()
             except socket.timeout:
                 # This is normal. It gives us time to loop and check threads.
@@ -350,16 +395,25 @@ class brNodeServer:
         while self.shutdown is False:
 
             if len(self.pendingConnect) > 0:
-                outNode = self.pendingConnect.pop()
+
+                with self.thrLock:
+                    outboundConnect = self.pendingConnect.pop()
+                
+                outboundIP = outboundConnect.thirdParty.nodeIP
+                outboundPort = outboundConnect.thirdParty.nodePort
+
                 try:
                     obsoc = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                     logger.debug("Attempting to connect to node...")
-                    obsoc.connect((outNode.nodeIP, outNode.nodePort))
-                    spawnThread = threading.Thread(name=f'brNodeCon-outbound-({outNode.nodeIP})',target=self.__connectionThread__, args=[outNode, obsoc, outNode.nodeIP, "outbound"])
+                    obsoc.connect((outboundIP, outboundPort))
+                    outboundConnect.assignedConn = obsoc
+                    spawnThread = threading.Thread(name=f'brNodeCon-outbound-({outboundIP})',target=self.__connectionThread__, args=[outboundConnect, "outbound"])
                     self.outboundNodeThreads.append(spawnThread)
                     spawnThread.start()
                     logger.debug("Connected.")
                 except:
+                    with self.thrLock:
+                        self.failedToConnect.append(outboundConnect)
                     logger.exception("Cannot connect to node!", exc_info=True)
             else:
 
@@ -389,8 +443,6 @@ class brNodeServer:
                 
         logger.info("All threads closed. Exiting main loop.")
             
-
-
     def __debugToFile__(data: bytes, id, count):
         tempdir = Path(f'temp/{id}')
         if not tempdir.is_dir():
@@ -399,15 +451,58 @@ class brNodeServer:
             df.write(data)
         logger.debug(f'Wrote packet to: temp/{id}/{str(count)}.packet')
 
-    def __router__(self, packet: brPacket, nodeIdent:brNodeRecord):
+    def __router__(self, packet: brPacket, nodeRoute:brRoute):
         if packet.messageType == brPacket.brMessageType.INTRODUCE:
-            logger.debug(f"Received introduction packet from node at {nodeIdent.nodeIP}! Success!!!")
+            chunks = nodeRoute.thirdParty.identity.chunkEncrypt(nodeRoute.routeSecret) # Should just be one chunk
+            reply = brPacket()
+            reply.messageType = brPacket.brMessageType.CHALLENGE
+            reply.data = chunks[0]
+            return reply.buildPacket()
+        elif packet.messageType == brPacket.brMessageType.CHALLENGE_RES:
+            try:
+                result = self.secureEnclave.assignedIdentity.decryptChunk(packet.data)
+            except:
+                logger.warning(f'Challenge failed against node at {nodeRoute.thirdParty.nodeIP} - possible security breach', exc_info=True)
+                return False
+            
+            try:
+                check = int(result.decode('utf-8'))
+            except:
+                logger.warning(f'Challenge failed against node at {nodeRoute.thirdParty.nodeIP} - bad data - Possible attack')
+                return False
+            
+            if check == nodeRoute.routeSecret:
+                nodeRoute.setHandShakeComplete()
+                if nodeRoute.routeType == nodeRoute.brRouteType.TEST:
+                    nodeRoute.routeType = nodeRoute.brRouteType.CONTROL
+                    with self.thrLock:
+                        self.inTesting.remove(nodeRoute)
+                        self.controlRoutes.append(nodeRoute)
+                reply = brPacket()
+                reply.messageType = brPacket.brMessageType.ENCR_COMMS
+                return reply.buildPacket()
+        elif packet.messageType == brPacket.brMessageType.CHALLENGE:
+            try:
+                result = self.secureEnclave.assignedIdentity.decryptChunk(packet.data)
+            except:
+                logger.warning(f"Failed to decrypt challenge from third party node at {nodeRoute.thirdParty.nodeIP} - possible attack")
+            sendback = nodeRoute.thirdParty.identity.chunkEncrypt(result)
+            reply = brPacket()
+            reply.messageType = brPacket.brMessageType.CHALLENGE_RES
+            reply.data = sendback
+            return reply.buildPacket()
+        elif packet.messageType == brPacket.brMessageType.ENCR_COMMS:
+            nodeRoute.setHandShakeComplete()
+        elif packet.messageType == brPacket.brMessageType.CALLBACK_PING:
             return True
 
-    def __connectionThread__(self, nodeIdent:brNodeRecord, connection: socket.socket, address, mode:str):
 
-        netAddress = address[0]
-        netPort = address[1]
+
+    def __connectionThread__(self, nodeRoute:brRoute, mode:str):
+
+        netAddress = nodeRoute.thirdParty.nodeIP
+        netPort = nodeRoute.thirdParty.nodePort
+        connection = nodeRoute.assignedConn
 
         # Statistics gathering
         debugCount = 0
@@ -418,14 +513,14 @@ class brNodeServer:
         ourErrors = 0
         # ----
 
-        # Make sure we do a Thread Safe lock! 
-        with self.thrLock:
-            if mode == "inbound":
-                logger.debug(f'Accepted inbound connection from {netAddress}:{netPort}')
-                self.inboundConnections.append(connection)
-            elif mode == "outbound":
-                logger.debug(f'Accepted outbound connection from {netAddress}:{netPort}')
-                self.outboundConnections.append(connection)
+        # Make sure we have a Public Key from who we are trying to talk to
+        if not nodeRoute.thirdPartyPubKeyCheck():
+            logger.error("Failed to get a public key. Validation failed, connection canceled.")
+            connection.close()
+            with self.thrLock:
+                self.failedToConnect.append(nodeRoute)
+            return
+
 
         # Check if we are the initiator and send introduction packet
         if mode == "outbound":
@@ -433,10 +528,13 @@ class brNodeServer:
             message.setMessageType(brPacket.brMessageType.INTRODUCE)
             message.setMessageVersion(BR_VERSION)
             packet = message.buildPacket()
-            brNodeServer.__debugToFile__(packet, debugID, debugCount)
-            debugCount += 1
-            connection.send(packet)
-        
+            try:
+                connection.send(packet)
+            except:
+                logger.exception("We attempted to initiate the connection and failed to get a proper response!", exc_info=True)
+            
+            
+        nodeRoute.thirdParty.connected = True
         
         while not self.shutdown:
 
@@ -444,14 +542,14 @@ class brNodeServer:
             try:
                 rawpacket = connection.recv(1024)
             except:
+                logger.exception("Critical error when receiving data!", exc_info=True)
                 break
 
-            if self.debug:
-                brNodeServer.__debugToFile__(rawpacket, debugID, debugCount)
-                debugCount += 1
 
             try:
                 if rawpacket:
+                    if nodeRoute.encryptionUpgraded:
+                        rawpacket = self.secureEnclave.assignedIdentity.decryptChunk(rawpacket)
                     message = brPacket(rawpacket)
                 else:
                     logger.info("Got empty packet. This thread will close.")
@@ -459,34 +557,42 @@ class brNodeServer:
                     break
             except Exception as e:
                 logger.exception("Critical error when processing client packet!", exc_info=True)
-                #brNodeServer.__debugToFile__(rawpacket, debugID, debugCount)
-                debugCount+= 1
-                ourErrors+= 1
+                break
+
                 
 
             # Hand off to router to get the full reply
             try:
-                pass
-                reply = self.__router__(message, nodeIdent)
-
-                # After we go through the router, we should be able to get an accurate measure of bytes handled
-                #ourHandledBytes += parsingResult.totalSize
-
-                #packet = reply.setBodySize().buildPacket()
+                reply = self.__router__(message, nodeRoute)
             except Exception as e:
                 logger.exception("Critical error when processing request!", exc_info=True)
-                #brNodeServer.__debugToFile__(rawpacket, debugID, debugCount)
-                debugCount+= 1
-                ourErrors+= 1
+                break
+            
+            if reply == False:
+                logger.error("Got a false return from the router. Something went wrong. Exiting.")
+                connection.close()
+                break
+            elif reply == True:
+                nodeRoute.setRouteStateIdle()
+                # We have time to look for messages and news
+                # For now, just do a callback ping
+                packet = brPacket()
+                packet.messageType = brPacket.brMessageType.CALLBACK_PING
+                reply = nodeRoute.thirdParty.identity.chunkEncrypt(packet)[0]
+                time.sleep(0.5)
+            else:
+                nodeRoute.setRouteStateBusy()
+                if nodeRoute.encryptionUpgraded:
+                    reply = nodeRoute.thirdParty.identity.chunkEncrypt(reply)[0]
+
+            connection.sendall(reply)
                 
 
 
             # End of processing
 
-            #brNodeServer.__debugToFile__(packet, debugID, debugCount)
-            debugCount += 1
             #connection.sendall(packet)
-            connection.close()
+            #connection.close()
             #ourHandledRequests+= 1
             #ourOutgoingBytes+= len(packet)
             
@@ -508,10 +614,49 @@ class brNodeServer:
         #    self.respondedToRequests += ourHandledRequests
         #    self.errors += ourErrors
 
-        with self.thrLock:
-            if mode == "inbound":
-                self.inboundConnections.remove(connection)
-            elif mode == "outbound":
-                self.outboundConnections.remove(connection)
 
+    def __networkController__(self):
+        logger.info("Network controller thread started.")
 
+        # Startup up procedure
+        # Check state of nodes in enclave
+        if not self.secureEnclave.isEncKey("knownNodes"):
+            # Lets get our hostname + IP to make sure we don't add ourselves to the seed list
+            hostname = socket.gethostname()
+            usIP = socket.gethostbyname(hostname)
+
+            primer = []
+            if Path('core/seedservers.txt').is_file():
+                with open('core/seedservers.txt') as file:
+                    for line in file:
+
+                        linesplit = line.split(":")
+
+                        if len(linesplit) == 3:
+                            ip = linesplit[0]
+                            webport = int(linesplit[1])
+                            port = int(linesplit[2])
+                        else:
+                            ip = line
+                            webport = 80
+                            port = 443
+
+                        try:
+                            socket.inet_aton(ip) # Will fail if it isn't a proper IP address
+                            newNodeObject = brNodeRecord()
+                            newNodeObject.nodeIP = ip
+                            newNodeObject.nodePort = port
+                            newNodeObject.webPort = webport
+                            if newNodeObject.queryPubKey():  # TODO: Add check - and ip != usIP
+                                pendingRoute = brRoute(brRoute.brRouteType.TEST, None, newNodeObject)
+                                self.pendingConnect.append(pendingRoute)
+                            else:
+                                logger.error(f'Seed server {ip} did not respond correctly when we asked for their public key. (Security Issue?)')
+                        except:
+                            logger.error(f'A line in the seedservers list is not a valid IP address or seed server. -> {line}')
+                logger.info(f"Primed nodes list for new node setup. {len(self.pendingConnect)} connection(s) added for startup.")
+        
+        logger.info("Network controller ready.")
+
+        while not self.shutdown:
+            time.sleep(0.5)
