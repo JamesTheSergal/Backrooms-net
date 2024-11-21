@@ -60,7 +60,7 @@ def node():
         logging.critical(
             "\n---- WARNING ----\n"
             "Using DEBUG mode and using the anonymous logging mode at the same time can log data that\n"
-            "could be used to identify your machine! Please reconsider! (Thanks for the logs tho)\n"
+            "could be used to identify your machine! Please reconsider! (Thanks for the logs tho <3)\n"
             "---- WARNING ----\n"
         )
         time.sleep(8)
@@ -90,7 +90,7 @@ def node():
     webServer.startServer()
     time.sleep(5)
 
-    nodeServer = brNodeNetworkCore.brNodeServer(localenc, webservAddress, brNodePort, debug)
+    nodeServer = brNodeNetworkCore.brNodeServer(localenc, webservAddress, brNodePort, webPort, debug)
     nodeServer.startServer()
 
     if not webServer.running:

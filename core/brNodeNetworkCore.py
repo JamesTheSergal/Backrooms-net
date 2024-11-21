@@ -130,6 +130,7 @@ class brPacket:
                 raise brPacket.brInvalidMessageType(messageType) 
             version = receivedPacket[1:15]
             self.version = version.lstrip(b'\0').decode('utf-8')
+            self.data = receivedPacket[15:]
         else:
             self.messageType:int = None
             self.version:str = BR_VERSION
@@ -138,9 +139,8 @@ class brPacket:
             self.toClient: str = None
             self.fromClient: str = None
             self.data: bytes = b''
-        # Check packet type and extract data from packet related to its type
-        if self.messageType == brPacket.brMessageType.CHALLENGE:
-            self.data = receivedPacket[16:]
+            
+
 
     def setMessageType(self, msgdesc:int):
         if msgdesc in brPacket.brMessageType:
@@ -182,9 +182,12 @@ class brNodeRecord:
             requestURL = f'http://{self.nodeIP}:{str(self.webPort)}/pubkey'
             logger.debug(f"Requesting public key from {requestURL}")
             try:
-                response = requests.get(url=requestURL, )
+                response = requests.get(url=requestURL)
+            except ConnectionRefusedError:
+                logger.error("Connection refused when connecting to get public key.")
+                return False
             except:
-                logger.exception("Python Requests exception when requesting public key...", exc_info=True)
+                logger.exception("Python Requests exception when requesting public key...", exc_info=False)
                 return False
             if response.status_code != 200:
                 return False
@@ -239,7 +242,6 @@ class brRoute:
     def setHandShakeComplete(self):
         logger.debug(f'Handshake with {self.thirdParty.nodeIP} complete.')
         self.thirdParty.finishedHandshake = True
-        self.encryptionUpgraded = True
 
     def thirdPartyPubKeyCheck(self):
         # Just make sure we have the other parties Public key.
@@ -264,7 +266,7 @@ class brNodeServer:
         """Exception base class for the brWebServer."""
         pass
 
-    def __init__(self, secureEnclave:notrustvars.enclave, bindAddress:str="127.0.0.1", nodePort:int=443, debug=False) -> None:
+    def __init__(self, secureEnclave:notrustvars.enclave, bindAddress:str="127.0.0.1", nodePort:int=443, insecurePort:int=80, debug=False) -> None:
 
         # If debug is set, we will log at the lowest level + debug timings
         self.debug = debug
@@ -273,6 +275,7 @@ class brNodeServer:
         # Network setup
         self.bindAddress = bindAddress
         self.nodePort:int = nodePort
+        self.insecurePort:int = insecurePort
         # ------------
 
         # Secure Enclave for peer stats
@@ -280,6 +283,7 @@ class brNodeServer:
         # ------------
 
         # Connection Pool
+        self.connPoolLock = threading.Lock()
         self.pendingConnect:list[brRoute] = [] # pending outgoing connections - Not inbound
         self.failedToConnect:list[brRoute] = []
         self.inTesting:list[brRoute] = []
@@ -298,12 +302,12 @@ class brNodeServer:
         # ------------
 
         # Threads
+        self.thrLock = threading.Lock()
         self.controllerThread:threading.Thread = None
         self.inboundThread:threading.Thread = None
         self.outboundThread:threading.Thread = None
         self.inboundNodeThreads:list[threading.Thread] = []
         self.outboundNodeThreads:list[threading.Thread] = []
-        self.thrLock = threading.Lock()
         # ------------
 
         # Server state flags
@@ -396,7 +400,7 @@ class brNodeServer:
 
             if len(self.pendingConnect) > 0:
 
-                with self.thrLock:
+                with self.connPoolLock:
                     outboundConnect = self.pendingConnect.pop()
                 
                 outboundIP = outboundConnect.thirdParty.nodeIP
@@ -411,10 +415,14 @@ class brNodeServer:
                     self.outboundNodeThreads.append(spawnThread)
                     spawnThread.start()
                     logger.debug("Connected.")
+                except ConnectionRefusedError:
+                    with self.thrLock:
+                        self.failedToConnect.append(outboundConnect)
+                    logger.exception("Cannot connect to node! Connection refused!", exc_info=False)
                 except:
                     with self.thrLock:
                         self.failedToConnect.append(outboundConnect)
-                    logger.exception("Cannot connect to node!", exc_info=True)
+                    logger.exception("Connection error!", exc_info=True)
             else:
 
                 # Dead thread sweep
@@ -453,9 +461,18 @@ class brNodeServer:
 
     def __router__(self, packet: brPacket, nodeRoute:brRoute):
         if packet.messageType == brPacket.brMessageType.INTRODUCE:
-            chunks = nodeRoute.thirdParty.identity.chunkEncrypt(nodeRoute.routeSecret) # Should just be one chunk
+
+            if nodeRoute.thirdParty.identity == None:
+                thirdpartyport = int.from_bytes(packet.data)
+                nodeRoute.thirdParty.webPort = thirdpartyport
+                if not nodeRoute.thirdPartyPubKeyCheck():
+                    logger.error("Could not get public key from node to establish identity!")
+                    return False
+                
+            chunks = nodeRoute.thirdParty.identity.chunkEncrypt(str(nodeRoute.routeSecret).encode('utf-8')) # Should just be one chunk
             reply = brPacket()
-            reply.messageType = brPacket.brMessageType.CHALLENGE
+            reply.setMessageType(brPacket.brMessageType.CHALLENGE)
+            reply.setMessageVersion(BR_VERSION)
             reply.data = chunks[0]
             return reply.buildPacket()
         elif packet.messageType == brPacket.brMessageType.CHALLENGE_RES:
@@ -466,7 +483,7 @@ class brNodeServer:
                 return False
             
             try:
-                check = int(result.decode('utf-8'))
+                check = int(result)
             except:
                 logger.warning(f'Challenge failed against node at {nodeRoute.thirdParty.nodeIP} - bad data - Possible attack')
                 return False
@@ -479,24 +496,30 @@ class brNodeServer:
                         self.inTesting.remove(nodeRoute)
                         self.controlRoutes.append(nodeRoute)
                 reply = brPacket()
-                reply.messageType = brPacket.brMessageType.ENCR_COMMS
+                reply.setMessageType(brPacket.brMessageType.ENCR_COMMS)
+                reply.setMessageVersion(BR_VERSION)
                 return reply.buildPacket()
+            else:
+                logger.warning(f'Response to our challenge was invalid! Their response: {check}')
+                return False
         elif packet.messageType == brPacket.brMessageType.CHALLENGE:
             try:
                 result = self.secureEnclave.assignedIdentity.decryptChunk(packet.data)
             except:
-                logger.warning(f"Failed to decrypt challenge from third party node at {nodeRoute.thirdParty.nodeIP} - possible attack")
+                logger.warning(f"Failed to decrypt challenge from third party node at {nodeRoute.thirdParty.nodeIP} - possible attack", exc_info=True)
+                return False
             sendback = nodeRoute.thirdParty.identity.chunkEncrypt(result)
             reply = brPacket()
-            reply.messageType = brPacket.brMessageType.CHALLENGE_RES
-            reply.data = sendback
+            reply.setMessageType(brPacket.brMessageType.CHALLENGE_RES)
+            reply.setMessageVersion(BR_VERSION)
+            reply.data = sendback[0]
             return reply.buildPacket()
         elif packet.messageType == brPacket.brMessageType.ENCR_COMMS:
             nodeRoute.setHandShakeComplete()
+            nodeRoute.encryptionUpgraded = True
+            return True
         elif packet.messageType == brPacket.brMessageType.CALLBACK_PING:
             return True
-
-
 
     def __connectionThread__(self, nodeRoute:brRoute, mode:str):
 
@@ -514,7 +537,7 @@ class brNodeServer:
         # ----
 
         # Make sure we have a Public Key from who we are trying to talk to
-        if not nodeRoute.thirdPartyPubKeyCheck():
+        if not nodeRoute.thirdPartyPubKeyCheck() and mode != "inbound":
             logger.error("Failed to get a public key. Validation failed, connection canceled.")
             connection.close()
             with self.thrLock:
@@ -527,9 +550,11 @@ class brNodeServer:
             message = brPacket()
             message.setMessageType(brPacket.brMessageType.INTRODUCE)
             message.setMessageVersion(BR_VERSION)
+            message.data = self.insecurePort.to_bytes(length=4)
             packet = message.buildPacket()
             try:
                 connection.send(packet)
+                logger.debug(f"Sent introduction packet to {netAddress}")
             except:
                 logger.exception("We attempted to initiate the connection and failed to get a proper response!", exc_info=True)
             
@@ -540,7 +565,7 @@ class brNodeServer:
 
             # Attempt to receive data and handle issues
             try:
-                rawpacket = connection.recv(1024)
+                rawpacket = connection.recv(1024)  # TODO: Set time-out to kill threads we aren't using
             except:
                 logger.exception("Critical error when receiving data!", exc_info=True)
                 break
@@ -560,12 +585,11 @@ class brNodeServer:
                 break
 
                 
-
             # Hand off to router to get the full reply
             try:
                 reply = self.__router__(message, nodeRoute)
             except Exception as e:
-                logger.exception("Critical error when processing request!", exc_info=True)
+                logger.exception("Critical error when processing request!", exc_info=True) # TODO: handle brInvalidMessageType
                 break
             
             if reply == False:
@@ -576,14 +600,20 @@ class brNodeServer:
                 nodeRoute.setRouteStateIdle()
                 # We have time to look for messages and news
                 # For now, just do a callback ping
-                packet = brPacket()
-                packet.messageType = brPacket.brMessageType.CALLBACK_PING
+                message = brPacket()
+                message.setMessageType(brPacket.brMessageType.CALLBACK_PING)
+                message.setMessageVersion(BR_VERSION)
+                packet = message.buildPacket()
                 reply = nodeRoute.thirdParty.identity.chunkEncrypt(packet)[0]
                 time.sleep(0.5)
             else:
                 nodeRoute.setRouteStateBusy()
                 if nodeRoute.encryptionUpgraded:
                     reply = nodeRoute.thirdParty.identity.chunkEncrypt(reply)[0]
+                
+                # Last step of the handshake process. Makes sure that the packet goes out without being encrypted
+                if nodeRoute.thirdParty.finishedHandshake == True and nodeRoute.encryptionUpgraded == False:
+                    nodeRoute.encryptionUpgraded = True
 
             connection.sendall(reply)
                 
@@ -647,11 +677,12 @@ class brNodeServer:
                             newNodeObject.nodeIP = ip
                             newNodeObject.nodePort = port
                             newNodeObject.webPort = webport
-                            if newNodeObject.queryPubKey():  # TODO: Add check - and ip != usIP
-                                pendingRoute = brRoute(brRoute.brRouteType.TEST, None, newNodeObject)
-                                self.pendingConnect.append(pendingRoute)
-                            else:
-                                logger.error(f'Seed server {ip} did not respond correctly when we asked for their public key. (Security Issue?)')
+                            with self.connPoolLock:
+                                if newNodeObject.queryPubKey():  # TODO: Add check - and ip != usIP
+                                    pendingRoute = brRoute(brRoute.brRouteType.TEST, None, newNodeObject)
+                                    self.pendingConnect.append(pendingRoute)
+                                else:
+                                    logger.error(f'Seed server {ip} did not respond correctly when we asked for their public key. (Security Issue?)')
                         except:
                             logger.error(f'A line in the seedservers list is not a valid IP address or seed server. -> {line}')
                 logger.info(f"Primed nodes list for new node setup. {len(self.pendingConnect)} connection(s) added for startup.")
