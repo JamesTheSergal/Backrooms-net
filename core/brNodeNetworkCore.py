@@ -116,8 +116,9 @@ class brPacket:
         FRIEND_ANNOUNCE = 5
         PING = 6
         CALLBACK_PING = 7   # Absolute Solver - Used to provide a window for response
-        READY_MESSAGE = 8
-        MESSAGE = 9
+        NEW_MESSAGE = 8     # Packet will contain the number of packets after this one to be received
+        READY_MESSAGE = 9   # Response that we are ready to receive sequence
+        MESSAGE = 10        # Data to receive
 
     def __init__(self, receivedPacket:bytes=None) -> None:
 
