@@ -476,7 +476,7 @@ class brWebServer:
         while self.shutdown is False:
             try:
                 connection, address = soc.accept()
-                spawnThread = threading.Thread(target=self.__connectionThread__, args=[connection, address])
+                spawnThread = threading.Thread(target=self.__connectionThread__, name="brWebCore-Thread", args=[connection, address])
                 self.webThreads.append(spawnThread)
                 spawnThread.start()
             except socket.timeout:
