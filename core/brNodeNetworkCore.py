@@ -141,8 +141,6 @@ class brPacket:
             self.fromClient: str = None
             self.data: bytes = b''
             
-
-
     def setMessageType(self, msgdesc:int):
         if msgdesc in brPacket.brMessageType:
             self.messageType = msgdesc
@@ -168,15 +166,26 @@ class brPacket:
 class brNodeRecord:
 
     def __init__(self):
+        # Connection
         self.nodeIP:str = None
         self.nodePort:int = 443
         self.webPort:int = 80
-        self.identity: notrustvars.enclave.security.identity = None
-        self.friendlyName = "Unknown"
         self.lastLatency = 0
         self.connected = False
         self.finishedHandshake = False
+
+        # Identity
+        self.identity: notrustvars.enclave.security.identity = None
+        self.localNodeID = uuid.uuid4()
+        self.friendlyName = "Unknown"
+
+        # For controller
         self.firstSeen = time.time()
+        self.lastSeen = 0
+        self.recordThreadLock = threading.Lock()
+        self.participatingInRoutes = []
+
+        logger.debug(f'New node record ID: {self.localNodeID}')
 
     def queryPubKey(self):
         if self.nodeIP:
@@ -204,6 +213,20 @@ class brNodeRecord:
         self.nodeIP = addressTupl[0]
         self.nodePort = addressTupl[1]
 
+    def setNodeDisconnectedState(self):
+        with self.recordThreadLock:
+            self.lastLatency = 0
+            self.connected = False
+            self.participatingInRoutes.clear()
+            # Pickle cannot store thread locks, so we must make it none!
+            self.recordThreadLock = None
+        return self
+
+class brClient:
+
+    def __init__(self, clientID:str):
+        self.clientID = clientID
+
 class brRoute:
 
     class brRouteType(IntEnum):
@@ -217,11 +240,13 @@ class brRoute:
     def __init__(self, routeType:brRouteType, assignedConnection:socket.socket, thirdParty:brNodeRecord):
         self.routeType = routeType 
         self.routeSecret = random.randrange(0, 1000000)
+        self.routeID = uuid.uuid4()
         self.assignedConn:socket.socket = assignedConnection # Our thread or some such
         self.connThread: threading.Thread = None
         self.thirdParty:brNodeRecord = thirdParty # Would be the node Record 
         self.routeThreadLock = threading.Lock()
         self.timeToLive = 0
+        self.controllerLastSeen = 0
         self.encryptionUpgraded = False
 
         # If we are a hop, we won't know these
@@ -237,12 +262,22 @@ class brRoute:
         self.outbox = []
         self.routeState = "Unknown"
 
+        # Make reference to this route in the third party record
+        with self.thirdParty.recordThreadLock:
+            self.thirdParty.participatingInRoutes.append(self)
+
+
     def isHandShakeComplete(self):
         return self.thirdParty.finishedHandshake
     
     def setHandShakeComplete(self):
         logger.debug(f'Handshake with {self.thirdParty.nodeIP} complete.')
-        self.thirdParty.finishedHandshake = True
+        with self.routeThreadLock:
+            self.thirdParty.finishedHandshake = True
+
+    def setConnectedState(self, state:bool):
+        with self.routeThreadLock:
+            self.thirdParty.connected = state
 
     def thirdPartyPubKeyCheck(self):
         # Just make sure we have the other parties Public key.
@@ -255,12 +290,35 @@ class brRoute:
             return True
                 
     def setRouteStateIdle(self):
-        self.routeState = "Idle"
+        with self.routeThreadLock:
+            self.routeState = "Idle"
 
     def setRouteStateBusy(self):
-        self.routeState = "Busy"
+        with self.routeThreadLock:
+            self.routeState = "Busy"
 
+    def upgradeRouteType(self, brtype:brRouteType):
+        with self.routeThreadLock:
+            self.routeType = brtype
+            self.controllerLastSeen = 0
     
+    def controllerLastSeenNow(self):
+        with self.routeThreadLock:
+            self.controllerLastSeen = time.time()
+
+    def removeRouteReference(self):
+        with self.thirdParty.recordThreadLock:
+            self.thirdParty.participatingInRoutes.remove(self)
+
+class brNodeControllerRequestAgent:
+
+    class brControllerRequestType(IntEnum):
+        CREATE_ROUTE = 0
+        ESTABLISH_CLIENT = 1
+
+    def __init__(self):
+        pass
+
 class brNodeServer:
 
     class brNodeServerException(Exception):
@@ -294,8 +352,10 @@ class brNodeServer:
         # ------------
 
         # Network controller specific
+        self.controllerLock = threading.Lock()
         self.ourClients = {}
         self.knownClients = {}
+        self.knownNodes:dict[str][brNodeRecord] = {} # Key is IP address
         self.globalAnnounce:list = []
         # Controller Notes
         # Keys in Enclave:
@@ -321,7 +381,6 @@ class brNodeServer:
         self.handledIncomingBytes = 0
         self.handledOutgoingBytes = 0
         self.respondedToRequests = 0
-        self.errors = 0
         # ------------
 
     def startServer(self):
@@ -342,13 +401,13 @@ class brNodeServer:
         self.controllerThread.join()
 
     def __inboundLoop__(self):
-        self.running = True
         
         try:
             soc = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             soc.bind((self.bindAddress, self.nodePort))
             soc.listen(4)
             soc.settimeout(0.5)
+            self.running = True
         except Exception as e:
             logger.exception("Error occured when creating socket!", exc_info=True)
             self.running = False
@@ -360,8 +419,17 @@ class brNodeServer:
             try:
                 connection, address = soc.accept()
 
-                pendingNode = brNodeRecord()
-                pendingNode.setNodeAddress(address)
+                # Check to see if we have seen this connection before
+                nodeIP = address[0]
+
+                if nodeIP in self.knownNodes.keys():
+                    pendingNode = self.knownNodes[nodeIP]
+                else:
+                    pendingNode = brNodeRecord()
+                    pendingNode.setNodeAddress(address)
+                    with self.controllerLock:
+                        self.knownNodes[nodeIP] = pendingNode
+                    
 
                 pendingRoute = brRoute(brRoute.brRouteType.TEST, connection, pendingNode)
 
@@ -464,8 +532,13 @@ class brNodeServer:
         if packet.messageType == brPacket.brMessageType.INTRODUCE:
 
             if nodeRoute.thirdParty.identity == None:
-                thirdpartyport = int.from_bytes(packet.data)
-                nodeRoute.thirdParty.webPort = thirdpartyport
+                thirdpartyconfig = packet.data.decode('utf-8')
+                configSplit = thirdpartyconfig.split('-')
+                thirdPartyWebPort = int(configSplit[0])
+                thirdPartyNodePort = int(configSplit[1])
+
+                nodeRoute.thirdParty.webPort = thirdPartyWebPort
+                nodeRoute.thirdParty.nodePort = thirdPartyNodePort
                 if not nodeRoute.thirdPartyPubKeyCheck():
                     logger.error("Could not get public key from node to establish identity!")
                     return False
@@ -492,7 +565,7 @@ class brNodeServer:
             if check == nodeRoute.routeSecret:
                 nodeRoute.setHandShakeComplete()
                 if nodeRoute.routeType == nodeRoute.brRouteType.TEST:
-                    nodeRoute.routeType = nodeRoute.brRouteType.CONTROL
+                    nodeRoute.upgradeRouteType(brRoute.brRouteType.CONTROL)
                     with self.thrLock:
                         self.inTesting.remove(nodeRoute)
                         self.controlRoutes.append(nodeRoute)
@@ -548,7 +621,8 @@ class brNodeServer:
             message = brPacket()
             message.setMessageType(brPacket.brMessageType.INTRODUCE)
             message.setMessageVersion(BR_VERSION)
-            message.data = self.insecurePort.to_bytes(length=4)
+            ourConfig = f'{self.insecurePort}-{self.nodePort}'.encode('utf-8')
+            message.data = ourConfig
             packet = message.buildPacket()
             try:
                 connection.send(packet)
@@ -557,7 +631,7 @@ class brNodeServer:
                 logger.exception("We attempted to initiate the connection and failed to get a proper response!", exc_info=True)
             
             
-        nodeRoute.thirdParty.connected = True
+        nodeRoute.setConnectedState(True)
         
         while not self.shutdown:
 
@@ -574,6 +648,8 @@ class brNodeServer:
                 if rawpacket:
                     if nodeRoute.encryptionUpgraded:
                         rawpacket = self.secureEnclave.assignedIdentity.decryptChunk(rawpacket)
+                        #TODO: Out of sync encryption when reconnecting to node.
+                        #Must find a better way to coordinate 
                     message = brPacket(rawpacket)
                 else:
                     logger.info("Got empty packet. This thread will close.")
@@ -613,7 +689,8 @@ class brNodeServer:
                 
                 # Last step of the handshake process. Makes sure that the packet goes out without being encrypted
                 if nodeRoute.thirdParty.finishedHandshake == True and nodeRoute.encryptionUpgraded == False:
-                    nodeRoute.encryptionUpgraded = True
+                    with nodeRoute.routeThreadLock:
+                        nodeRoute.encryptionUpgraded = True
 
             ourOutgoingBytes += len(reply)
             connection.sendall(reply)
@@ -633,11 +710,13 @@ class brNodeServer:
         # We broke out, find out why!
         if self.shutdown:
             logger.info("Thread got shutdown signal.")
+            nodeRoute.setConnectedState(False)
+            connection.close()
         else:
-            if self.debug:
-                logger.info(f'Thread shutting down - Handled {debugCount} packets.')
-            else:
-                logger.info(f'Thread shutting down.')
+            logger.info(f'Thread abnormal shutdown.')
+            nodeRoute.setConnectedState(False)
+            connection.close()
+
         
         # Publish our stats really quick
         with self.statsLock:
@@ -648,6 +727,12 @@ class brNodeServer:
     def __networkController__(self):
         logger.info("Network controller thread started.")
 
+        # Wait for both the inbound and outbound threads to be started completely...
+        while not self.inboundThread.is_alive() and not self.outboundThread.is_alive():
+            time.sleep(0.5)
+        
+        logger.info("Controller repopulating connections...")
+
         # Startup up procedure
         # Check state of nodes in enclave
         if not self.secureEnclave.isEncKey("knownNodes"):
@@ -655,7 +740,6 @@ class brNodeServer:
             hostname = socket.gethostname()
             usIP = socket.gethostbyname(hostname)
 
-            primer = []
             if Path('core/seedservers.txt').is_file():
                 with open('core/seedservers.txt') as file:
                     for line in file:
@@ -686,8 +770,50 @@ class brNodeServer:
                         except:
                             logger.error(f'A line in the seedservers list is not a valid IP address or seed server. -> {line}')
                 logger.info(f"Primed nodes list for new node setup. {len(self.pendingConnect)} connection(s) added for startup.")
+        else:
+            nodelist:list[brNodeRecord] = self.secureEnclave.returnData("knownNodes")
+            for node in nodelist:
+
+                # Since pickle cannot store thread locks, we must be careful and re-populate this
+                node.recordThreadLock = threading.Lock()
+
+                pendingRoute = brRoute(brRoute.brRouteType.TEST, None, node)
+                with self.connPoolLock:
+                    self.pendingConnect.append(pendingRoute)
+            logger.info(f'Finished adding {len(nodelist)} nodes to reconnect to...')
+
         
         logger.info("Network controller ready.")
 
+        # Local variables for controller
+
         while not self.shutdown:
+
+            looptime = time.time()
+            
+            # Scan routes for changes
+            for route in self.controlRoutes:
+                if route.controllerLastSeen == 0:
+                    logger.info(f"Controller is ready to use route-{route.routeID}")
+                    route.controllerLastSeenNow()
+            
             time.sleep(0.5)
+        
+        # Broke out, begin shutting down and saving node/route states.
+        logger.info("Controller is waiting for all other threads to shut down before saving...")
+        while self.inboundThread.is_alive() and self.outboundThread.is_alive():
+            time.sleep(0.2)
+        
+        #TODO: at a later date, make routes restorable
+        logger.info("Saving node data - Gathering nodes...")
+        nodeGather = []
+        for nodeIP in self.knownNodes.keys():
+            node:brNodeRecord = self.knownNodes[nodeIP]
+            node.setNodeDisconnectedState()
+            nodeGather.append(node)
+        
+        self.secureEnclave.updateEntry("knownNodes", nodeGather, True)
+            
+
+
+
