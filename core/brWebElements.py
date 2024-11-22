@@ -163,8 +163,7 @@ class brWebUIModule(brWebPage):
             genHeader() +
             genNavBar() +
             genBody(
-                 f'<h4>Web Server stats</h4>'
-                 f'<hr />'+
+                 f'<h4>Web Server stats</h4>'+
                  f'<p>We have handled {humanbytes(webInBytes)} In</p>\n' +
                  f'<p>We have handled {humanbytes(webOutBytes)} Out</p>\n' +
                  f'<p>We have handled {webRequests} Requests</p>\n' +
