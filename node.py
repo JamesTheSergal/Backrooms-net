@@ -23,6 +23,11 @@ def publishWebServerStats(localenc:enc.enclave, webServer: brWebCore.brWebServer
     localenc.updateEntry("brWebCore_requests", webServer.respondedToRequests)
     localenc.updateEntry("brWebCore_connections", len(webServer.connections))
 
+def publishNodeServerStats(localenc:enc.enclave, nodeServer: brNodeNetworkCore.brNodeServer):
+    localenc.updateEntry("brNodeNetwork_incomingBytes", nodeServer.handledIncomingBytes)
+    localenc.updateEntry("brNodeNetwork_outgoingBytes", nodeServer.handledOutgoingBytes)
+    localenc.updateEntry("brNodeNetwork_requests", nodeServer.respondedToRequests)
+
 def node():
 
     # Print our fancy thing
@@ -98,12 +103,15 @@ def node():
         logging.info("Saving persistence data...")
         localenc.saveEnclaveFile(overwrite=True)
         exit()
+    
+
 
     try:
         while True:
             time.sleep(5)
             # Publish web server stats to enclave
             publishWebServerStats(localenc, webServer)
+            publishNodeServerStats(localenc, nodeServer)
             
 
     except KeyboardInterrupt:

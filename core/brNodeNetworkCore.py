@@ -528,12 +528,9 @@ class brNodeServer:
         connection = nodeRoute.assignedConn
 
         # Statistics gathering
-        debugCount = 0
-        debugID = uuid.uuid4()
         ourHandledBytes = 0
         ourOutgoingBytes = 0
         ourHandledRequests = 0
-        ourErrors = 0
         # ----
 
         # Make sure we have a Public Key from who we are trying to talk to
@@ -566,6 +563,7 @@ class brNodeServer:
             # Attempt to receive data and handle issues
             try:
                 rawpacket = connection.recv(1024)  # TODO: Set time-out to kill threads we aren't using
+                ourHandledBytes += len(rawpacket)
             except:
                 logger.exception("Critical error when receiving data!", exc_info=True)
                 break
@@ -588,6 +586,7 @@ class brNodeServer:
             # Hand off to router to get the full reply
             try:
                 reply = self.__router__(message, nodeRoute)
+                ourHandledRequests+= 1
             except Exception as e:
                 logger.exception("Critical error when processing request!", exc_info=True) # TODO: handle brInvalidMessageType
                 break
@@ -599,7 +598,7 @@ class brNodeServer:
             elif reply == True:
                 nodeRoute.setRouteStateIdle()
                 # We have time to look for messages and news
-                # For now, just do a callback ping
+                
                 message = brPacket()
                 message.setMessageType(brPacket.brMessageType.CALLBACK_PING)
                 message.setMessageVersion(BR_VERSION)
@@ -615,16 +614,18 @@ class brNodeServer:
                 if nodeRoute.thirdParty.finishedHandshake == True and nodeRoute.encryptionUpgraded == False:
                     nodeRoute.encryptionUpgraded = True
 
+            ourOutgoingBytes += len(reply)
             connection.sendall(reply)
                 
-
-
-            # End of processing
-
-            #connection.sendall(packet)
-            #connection.close()
-            #ourHandledRequests+= 1
-            #ourOutgoingBytes+= len(packet)
+            # If our route was Idle, send our stats really quick
+            if nodeRoute.routeState == "Idle":
+                with self.statsLock:
+                    self.handledIncomingBytes += ourHandledBytes
+                    self.handledOutgoingBytes += ourOutgoingBytes
+                    self.respondedToRequests += ourHandledRequests
+                    ourHandledBytes = 0
+                    ourOutgoingBytes = 0
+                    ourHandledRequests = 0
             
 
         
@@ -638,13 +639,11 @@ class brNodeServer:
                 logger.info(f'Thread shutting down.')
         
         # Publish our stats really quick
-        #with self.statsLock:
-        #    self.handledIncomingBytes += ourHandledBytes
-        #    self.handledOutgoingBytes += ourOutgoingBytes
-        #    self.respondedToRequests += ourHandledRequests
-        #    self.errors += ourErrors
-
-
+        with self.statsLock:
+            self.handledIncomingBytes += ourHandledBytes
+            self.handledOutgoingBytes += ourOutgoingBytes
+            self.respondedToRequests += ourHandledRequests
+        
     def __networkController__(self):
         logger.info("Network controller thread started.")
 

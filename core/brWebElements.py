@@ -148,21 +148,33 @@ class brWebUIModule(brWebPage):
         return self.buildResponse(context)
     
     def statsPage(self, context: brWebServer.packetParser):
-        inBytes = self.secureEnclave.returnData("brWebCore_incomingBytes")
-        outBytes = self.secureEnclave.returnData("brWebCore_outgoingBytes")
-        requests = self.secureEnclave.returnData("brWebCore_requests")
-        errors = self.secureEnclave.returnData("brWebCore_errors")
-        connections = self.secureEnclave.returnData("brWebCore_connections")
+
+        webInBytes = self.secureEnclave.returnData("brWebCore_incomingBytes")
+        webOutBytes = self.secureEnclave.returnData("brWebCore_outgoingBytes")
+        webRequests = self.secureEnclave.returnData("brWebCore_requests")
+        webErrors = self.secureEnclave.returnData("brWebCore_errors")
+        webConnections = self.secureEnclave.returnData("brWebCore_connections")
+
+        nodeInBytes = self.secureEnclave.returnData("brNodeNetwork_incomingBytes")
+        nodeOutBytes = self.secureEnclave.returnData("brNodeNetwork_outgoingBytes")
+        nodeRequests = self.secureEnclave.returnData("brNodeNetwork_requests")
 
         self.addContent(
             genHeader() +
             genNavBar() +
             genBody(
-                 f'<p>We have handled {humanbytes(inBytes)} In</p>\n' +
-                 f'<p>We have handled {humanbytes(outBytes)} Out</p>\n' +
-                 f'<p>We have handled {requests} Requests</p>\n' +
-                 f'<p>We have had {errors} Errors</p>\n' +
-                 f'<p>We currently have {connections} Connections</p>\n'
+                 f'<h4>Web Server stats</h4>'
+                 f'<hr />'+
+                 f'<p>We have handled {humanbytes(webInBytes)} In</p>\n' +
+                 f'<p>We have handled {humanbytes(webOutBytes)} Out</p>\n' +
+                 f'<p>We have handled {webRequests} Requests</p>\n' +
+                 f'<p>We have had {webErrors} Errors</p>\n' +
+                 f'<p>We currently have {webConnections} Connections</p>\n'+
+                 f'<hr />'+
+                 f'<h4>Node Network stats</h4>'+
+                 f'<p>We have handled {humanbytes(nodeInBytes)} In</p>\n' +
+                 f'<p>We have handled {humanbytes(nodeOutBytes)} Out</p>\n' +
+                 f'<p>We have handled {nodeRequests} Requests</p>\n'
             ) +
             genFooter()
         )
