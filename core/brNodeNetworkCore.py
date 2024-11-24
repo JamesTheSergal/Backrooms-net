@@ -504,7 +504,7 @@ class brNodeServer:
                     self.outboundNodeThreads.remove(thr)
 
 
-                time.sleep(0.05)
+                time.sleep(0.1)
         
         # Broke out of loop. We must be shutting down.
         logger.info("Outbound Node loop received shutdown, refusing new connections.")
@@ -681,7 +681,7 @@ class brNodeServer:
                 message.setMessageVersion(BR_VERSION)
                 packet = message.buildPacket()
                 reply = nodeRoute.thirdParty.identity.chunkEncrypt(packet)[0]
-                time.sleep(0.5)
+                time.sleep(1)
             else:
                 nodeRoute.setRouteStateBusy()
                 if nodeRoute.encryptionUpgraded:
