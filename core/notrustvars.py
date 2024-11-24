@@ -89,7 +89,6 @@ class enclave:
         def __str__(self):
             return f"{self.message} {self.key}"
 
-
     class security:
         """Base security class for Backrooms Enclaves.
         """
@@ -324,7 +323,13 @@ class enclave:
                 enclave.security.secure_zero_memory(referenceToData.exp2)
                 enclave.security.secure_zero_memory(referenceToData.coef)
                 return None
-            
+    
+    class listInterface:
+        
+        def __init__(self, internalReference:list, threadLockObject:threading.Lock) -> None:
+            self.data:list = internalReference
+            self.thrLock:threading.Lock = threadLockObject
+       
     def __init__(self, enclaveName, newIdentity:bool = False) -> None:
 
         self.enclaveName = enclaveName
@@ -485,3 +490,25 @@ class enclave:
         else:
             raise enclave.enclaveValueDoesNotExist(key)
         return requested
+    
+    def createIfNotExist(self, key, data):
+        if not self.isEncKey(key):
+            with self.__threadLock:
+                self.__data[key] = data
+            return False
+        else:
+            return True
+            
+    
+    def createListInterface(self, key, create:bool=True):
+        if self.isEncKey(key):
+            if isinstance(self.__data[key], list):
+                return self.listInterface(self.__data[key], self.__threadLock)
+            else:
+                raise enclave.enclaveValueDoesNotExist(key) # TODO: change this later
+        else:
+            if create:
+                self.__data[key] = []
+                return self.listInterface(self.__data[key, self.__threadLock])
+            else:
+                raise enclave.enclaveValueDoesNotExist(key)
