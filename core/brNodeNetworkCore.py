@@ -183,7 +183,7 @@ class brNodeRecord:
         self.firstSeen = time.time()
         self.lastSeen = 0
         self.recordThreadLock = threading.Lock()
-        self.participatingInRoutes = []
+        self.participatingInRoutes:list[brRoute] = []
 
         logger.debug(f'New node record ID: {self.localNodeID}')
 
@@ -217,9 +217,10 @@ class brNodeRecord:
         with self.recordThreadLock:
             self.lastLatency = 0
             self.connected = False
+            self.finishedHandshake = False
             self.participatingInRoutes.clear()
             # Pickle cannot store thread locks, so we must make it none!
-            self.recordThreadLock = None
+        self.recordThreadLock = None
         return self
 
 class brClient:
@@ -326,7 +327,7 @@ class brNodeServer:
         pass
 
     def __init__(self, secureEnclave:notrustvars.enclave, bindAddress:str="127.0.0.1", nodePort:int=443, insecurePort:int=80, debug=False) -> None:
-
+                
         # If debug is set, we will log at the lowest level + debug timings
         self.debug = debug
         # ------------
@@ -339,6 +340,10 @@ class brNodeServer:
 
         # Secure Enclave for peer stats
         self.secureEnclave = secureEnclave
+        # ------------
+        
+        # Create enclave values if they aren't existing already
+        self.secureEnclave.createIfNotExist("knownNodes", dict())
         # ------------
 
         # Connection Pool
@@ -355,7 +360,7 @@ class brNodeServer:
         self.controllerLock = threading.Lock()
         self.ourClients = {}
         self.knownClients = {}
-        self.knownNodes:dict[str][brNodeRecord] = {} # Key is IP address
+        self.knownNodes:dict[str][brNodeRecord] = secureEnclave.returnData("knownNodes")
         self.globalAnnounce:list = []
         # Controller Notes
         # Keys in Enclave:
@@ -528,10 +533,12 @@ class brNodeServer:
             df.write(data)
         logger.debug(f'Wrote packet to: temp/{id}/{str(count)}.packet')
 
-    def __router__(self, packet: brPacket, nodeRoute:brRoute):
+    def __router__(self, packet: brPacket, nodeRoute:brRoute, mode:str):
         if packet.messageType == brPacket.brMessageType.INTRODUCE:
 
-            if nodeRoute.thirdParty.identity == None:
+            if mode == "inbound":
+                # By default in inbound mode we will only get the connection port. (Randomly assigned internet port)
+                # If we want to reconnect, the introduction packet will have the ports configured on the other side.
                 thirdpartyconfig = packet.data.decode('utf-8')
                 configSplit = thirdpartyconfig.split('-')
                 thirdPartyWebPort = int(configSplit[0])
@@ -539,9 +546,10 @@ class brNodeServer:
 
                 nodeRoute.thirdParty.webPort = thirdPartyWebPort
                 nodeRoute.thirdParty.nodePort = thirdPartyNodePort
-                if not nodeRoute.thirdPartyPubKeyCheck():
-                    logger.error("Could not get public key from node to establish identity!")
-                    return False
+                
+            if not nodeRoute.thirdPartyPubKeyCheck():
+                logger.error("Could not get public key from node to establish identity!")
+                return False
                 
             chunks = nodeRoute.thirdParty.identity.chunkEncrypt(str(nodeRoute.routeSecret).encode('utf-8')) # Should just be one chunk
             reply = brPacket()
@@ -662,7 +670,7 @@ class brNodeServer:
                 
             # Hand off to router to get the full reply
             try:
-                reply = self.__router__(message, nodeRoute)
+                reply = self.__router__(message, nodeRoute, mode)
                 ourHandledRequests+= 1
             except Exception as e:
                 logger.exception("Critical error when processing request!", exc_info=True) # TODO: handle brInvalidMessageType
@@ -735,7 +743,7 @@ class brNodeServer:
 
         # Startup up procedure
         # Check state of nodes in enclave
-        if not self.secureEnclave.isEncKey("knownNodes"):
+        if len(self.knownNodes.keys()) < 1:
             # Lets get our hostname + IP to make sure we don't add ourselves to the seed list
             hostname = socket.gethostname()
             usIP = socket.gethostbyname(hostname)
@@ -771,16 +779,16 @@ class brNodeServer:
                             logger.error(f'A line in the seedservers list is not a valid IP address or seed server. -> {line}')
                 logger.info(f"Primed nodes list for new node setup. {len(self.pendingConnect)} connection(s) added for startup.")
         else:
-            nodelist:list[brNodeRecord] = self.secureEnclave.returnData("knownNodes")
-            for node in nodelist:
+            for nodeIP in self.knownNodes.keys():
 
+                node = self.knownNodes[nodeIP]
                 # Since pickle cannot store thread locks, we must be careful and re-populate this
                 node.recordThreadLock = threading.Lock()
 
                 pendingRoute = brRoute(brRoute.brRouteType.TEST, None, node)
                 with self.connPoolLock:
                     self.pendingConnect.append(pendingRoute)
-            logger.info(f'Finished adding {len(nodelist)} nodes to reconnect to...')
+            logger.info(f'Finished adding {len(self.pendingConnect)} nodes to reconnect to...')
 
         
         logger.info("Network controller ready.")
@@ -806,13 +814,11 @@ class brNodeServer:
         
         #TODO: at a later date, make routes restorable
         logger.info("Saving node data - Gathering nodes...")
-        nodeGather = []
         for nodeIP in self.knownNodes.keys():
             node:brNodeRecord = self.knownNodes[nodeIP]
             node.setNodeDisconnectedState()
-            nodeGather.append(node)
+        logger.info("Controller finished saving...")
         
-        self.secureEnclave.updateEntry("knownNodes", nodeGather, True)
             
 
 
