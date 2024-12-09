@@ -10,6 +10,7 @@ import time
 import uuid
 import requests
 from core import loggingfactory, notrustvars
+from core.brNodeNetworkUtil import brNodeManager
 #from node import BR_VERSION
 
 BR_VERSION = "0.0.1-alpha"
@@ -228,88 +229,6 @@ class brClient:
     def __init__(self, clientID:str):
         self.clientID = clientID
 
-class brRoute:
-
-    class brRouteType(IntEnum):
-        CONTROL = 0
-        TEST = 1
-        UNENCRYPTED = 2
-        ENCRYPTED = 3
-        ONION = 4
-        HIGHWAY = 5
-
-    def __init__(self, routeType:brRouteType, assignedConnection:socket.socket, thirdParty:brNodeRecord):
-        self.routeType = routeType 
-        self.routeSecret = random.randrange(0, 1000000)
-        self.routeID = uuid.uuid4()
-        self.assignedConn:socket.socket = assignedConnection # Our thread or some such
-        self.connThread: threading.Thread = None
-        self.thirdParty:brNodeRecord = thirdParty # Would be the node Record 
-        self.routeThreadLock = threading.Lock()
-        self.timeToLive = 0
-        self.controllerLastSeen = 0
-        self.encryptionUpgraded = False
-
-        # If we are a hop, we won't know these
-        self.connectingFrom = None # Client on our end we are connecting
-        self.connectingTo = None # Would be the client specifically we created this route for
-
-        # Connection updates
-        self.newNews = False
-        self.news = []
-        self.newIncoming = False
-        self.inbox = []
-        self.newOutgoing = False
-        self.outbox = []
-        self.routeState = "Unknown"
-
-        # Make reference to this route in the third party record
-        with self.thirdParty.recordThreadLock:
-            self.thirdParty.participatingInRoutes.append(self)
-
-
-    def isHandShakeComplete(self):
-        return self.thirdParty.finishedHandshake
-    
-    def setHandShakeComplete(self):
-        logger.debug(f'Handshake with {self.thirdParty.nodeIP} complete.')
-        with self.routeThreadLock:
-            self.thirdParty.finishedHandshake = True
-
-    def setConnectedState(self, state:bool):
-        with self.routeThreadLock:
-            self.thirdParty.connected = state
-
-    def thirdPartyPubKeyCheck(self):
-        # Just make sure we have the other parties Public key.
-        if self.thirdParty.identity == None:
-            if self.thirdParty.queryPubKey():
-                return True
-            else:
-                return False
-        else:
-            return True
-                
-    def setRouteStateIdle(self):
-        with self.routeThreadLock:
-            self.routeState = "Idle"
-
-    def setRouteStateBusy(self):
-        with self.routeThreadLock:
-            self.routeState = "Busy"
-
-    def upgradeRouteType(self, brtype:brRouteType):
-        with self.routeThreadLock:
-            self.routeType = brtype
-            self.controllerLastSeen = 0
-    
-    def controllerLastSeenNow(self):
-        with self.routeThreadLock:
-            self.controllerLastSeen = time.time()
-
-    def removeRouteReference(self):
-        with self.thirdParty.recordThreadLock:
-            self.thirdParty.participatingInRoutes.remove(self)
 
 class brNodeControllerRequestAgent:
 
@@ -346,15 +265,8 @@ class brNodeServer:
         self.secureEnclave.createIfNotExist("knownNodes", dict())
         # ------------
 
-        # Connection Pool
-        self.connPoolLock = threading.Lock()
-        self.pendingConnect:list[brRoute] = [] # pending outgoing connections - Not inbound
-        self.failedToConnect:list[brRoute] = []
-        self.inTesting:list[brRoute] = []
-        self.controlRoutes:list[brRoute] = []
-        self.activeRoutes:list[brRoute] = []
-        self.shutdownRoutes:list[brRoute] = []
-        # ------------
+        # managers
+        self.nodeManager = brNodeManager(self.secureEnclave)
 
         # Network controller specific
         self.controllerLock = threading.Lock()
