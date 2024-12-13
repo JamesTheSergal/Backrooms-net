@@ -1,4 +1,3 @@
-
 from enum import IntEnum
 import random
 import socket
@@ -13,17 +12,25 @@ logger = loggingfactory.createNewLogger("brNodeNetwork")
 
 class brNode():
     
-    def __init__(self) -> None:
-        self.controlConnection:brNodeConnection = None
-        self.identity: notrustvars.enclave.security.identity = None
+    def __init__(self, nodeIP:str, nodePort:int) -> None:
+        
+        # Net Records
+        self.nodeIP:str = None
+        self.nodePort:int = 443
+        self.webPort:int = 80
+        self.controlConnection:brRoute = None
+        self.lastLatency = 0
+        self.connected = False
+        self.completedHandshake = False
+        self.notAccessable = False # True if we cannot make a connection back to the other node. Usually means behind a NAT.
+
+        # Identity
         self.localNodeID = uuid.uuid4()
         self.friendlyName = "Unknown"
-        
+        self.identity: notrustvars.enclave.security.identity = None
+
+        # Meta
         self.participatingInRoutes:list[brRoute] = []
-        
-    def setNodeControlConnection(self, address:tuple, connection:socket.socket):
-        self.controlConnection = brNodeConnection().setIP(address[0]).setNodePort(address[1]).setSocketInst(connection)
-        return self
 
     def queryPublicKey(self):
         if self.nodeIP:
@@ -39,13 +46,16 @@ class brNode():
                 return False
             if response.status_code != 200:
                 return False
-            nodeident = notrustvars.enclave.security.identity.newIdentFromPubImport(response.text)
-            self.identity = nodeident
+            self.identity = notrustvars.enclave.security.identity.newIdentFromPubImport(response.text)
             logger.debug("Public key has been imported successfully.")
             return True
         else:
             logger.error("IP of node not set. Cannot get pubkey. (Check the code)")
             return False
+        
+    def addRoute(self, route):
+        self.participatingInRoutes.append(route)
+
 
 class brRoute:
 
@@ -61,17 +71,18 @@ class brRoute:
         self.routeType = routeType 
         self.routeSecret = random.randrange(0, 1000000)
         self.routeID = uuid.uuid4()
-        self.assignedConn:socket.socket = assignedConnection # Our thread or some such
-        self.connThread: threading.Thread = None
-        self.thirdParty:brNode = thirdParty # Would be the node Record 
+        self.assignedConn:socket.socket = assignedConnection
+        self.thirdParty:brNode = thirdParty # Would be the node obj
         self.routeThreadLock = threading.Lock()
         self.timeToLive = 0
         self.controllerLastSeen = 0
         self.encryptionUpgraded = False
 
-        # If we are a hop, we won't know these
+        # If we are a hop/control, we won't know these
         self.connectingFrom = None # Client on our end we are connecting
         self.connectingTo = None # Would be the client specifically we created this route for
+        # We will know this though
+        self.weInitiatedConnection = False
 
         # Connection updates
         self.newNews = False
@@ -124,42 +135,25 @@ class brRoute:
         with self.thirdParty.recordThreadLock:
             self.thirdParty.participatingInRoutes.remove(self)
 
-class brNodeConnection():
-    
-    def __init__(self) -> None:
-        self.connection:socket.socket = None
-        self.nodeIP:str = None
-        self.nodePort:int = 443
-        self.webPort:int = 80
-        self.lastLatency = 0
-        self.connected = False
-        self.finishedHandshake = False
-        self.notAccessable = False
-        
-    def setIP(self, ip:str):
-        self.nodeIP = ip
-        return self
-    
-    def setNodePort(self, port:int):
-        self.nodePort = port
-        return self
-    
-    def setWebPort(self, port:int):
-        self.webPort = port
-        return self
-    
-    def setSocketInst(self, soc:socket.socket):
-        self.connection = soc
         
 class brNodeManager():
     
     def __init__(self, enclave:notrustvars.enclave) -> None:
         self.nodes:dict[str][brNode] = {}
+        self.routes:dict[brNode][brRoute] = {}
         self.enc = enclave
         
-    def addTestRoute(self, connection:socket.socket, address:tuple):
+    def acceptConnection(self, connection:socket.socket, address:tuple):
         
         if address[0] not in self.nodes.keys():
-            newNode = brNode().setNodeControlConnection(address, connection)
+            newNode = brNode(address[0], address[1])
+            testRoute = brRoute(brRoute.brRouteType.TEST, connection, newNode)
+            newNode.addRoute(testRoute)
+            self.nodes[address[0]] = newNode
+            self.routes[newNode] = testRoute
+            return testRoute
         else:
-            pass
+            node:brNode = self.nodes[address[0]]
+            newRoute = brRoute(brRoute.brRouteType.TEST, connection, node)
+            node.addRoute(newRoute)
+            return newRoute
