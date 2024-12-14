@@ -137,17 +137,25 @@ class brRoute:
 
         
 class brNodeManager():
-    
+
     def __init__(self, enclave:notrustvars.enclave) -> None:
-        self.nodes:dict[str][brNode] = {}
-        self.routes:dict[brNode][brRoute] = {}
+        if enclave.isEncKey("brNodeManager"):
+            self = enclave.returnData("brNodeManager")
+        else:
+            self.nodes:dict[str][brNode] = {}
+            self.routes:dict[brNode][brRoute] = {}
         self.enc = enclave
+
+        # Do not store in enclave
+        self.thrLock = threading.Lock()
+        self.pendingConnectionRequests:list[brRoute] = []
         
-    def acceptConnection(self, connection:socket.socket, address:tuple):
+    def acceptConnection(self, connection:socket.socket, address:tuple, initiatedConnection=False) -> brRoute:
         
         if address[0] not in self.nodes.keys():
             newNode = brNode(address[0], address[1])
             testRoute = brRoute(brRoute.brRouteType.TEST, connection, newNode)
+            testRoute.weInitiatedConnection = initiatedConnection
             newNode.addRoute(testRoute)
             self.nodes[address[0]] = newNode
             self.routes[newNode] = testRoute
@@ -155,5 +163,27 @@ class brNodeManager():
         else:
             node:brNode = self.nodes[address[0]]
             newRoute = brRoute(brRoute.brRouteType.TEST, connection, node)
+            newRoute.weInitiatedConnection = initiatedConnection
             node.addRoute(newRoute)
             return newRoute
+        
+    def submitConnectionRequest(self, route:brRoute):
+        if route.thirdParty and route.assignedConn:
+            with self.thrLock:
+                self.pendingConnectionRequests.append(route)
+        else:
+            pass # Probably thrown an exception
+
+    def getConnectionRequest(self, pop=False):
+        if pop:
+            if len(self.pendingConnectionRequests) > 0:
+                with self.thrLock:
+                    route = self.pendingConnectionRequests.pop()
+                return route
+            else:
+                return False
+        else:
+            if len(self.pendingConnectionRequests) > 0:
+                return True
+            else:
+                return False

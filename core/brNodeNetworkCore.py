@@ -10,7 +10,7 @@ import time
 import uuid
 import requests
 from core import loggingfactory, notrustvars
-from core.brNodeNetworkUtil import brNodeManager
+from core.brNodeNetworkUtil import brNodeManager, brRoute
 from core.brDataBuilder import brPacket
 #from node import BR_VERSION
 
@@ -91,10 +91,8 @@ class brNodeServer:
 
         # Network controller specific
         self.controllerLock = threading.Lock()
-        self.ourClients = {}
-        self.knownClients = {}
-        self.knownNodes:dict[str][brNodeRecord] = secureEnclave.returnData("knownNodes")
         self.globalAnnounce:list = []
+        self.pendingConnect:list[brRoute] = []
         # Controller Notes
         # Keys in Enclave:
         # knownNodes
@@ -157,23 +155,10 @@ class brNodeServer:
             try:
                 connection, address = soc.accept()
 
-                # Check to see if we have seen this connection before
-                nodeIP = address[0]
+                route = self.nodeManager.acceptConnection(connection, address)
 
-                if nodeIP in self.knownNodes.keys():
-                    pendingNode = self.knownNodes[nodeIP]
-                else:
-                    pendingNode = brNodeRecord()
-                    pendingNode.setNodeAddress(address)
-                    with self.controllerLock:
-                        self.knownNodes[nodeIP] = pendingNode
-                    
-
-                pendingRoute = brRoute(brRoute.brRouteType.TEST, connection, pendingNode)
-
-                spawnThread = threading.Thread(name=f'brNodeCon-inbound-({address})',target=self.__connectionThread__, args=[pendingRoute, "inbound"])
+                spawnThread = threading.Thread(name=f'brNodeCon-inbound-({address})',target=self.__connectionThread__, args=[route])
                 self.inboundNodeThreads.append(spawnThread)
-                self.inTesting.append(pendingRoute)
                 spawnThread.start()
             except socket.timeout:
                 # This is normal. It gives us time to loop and check threads.
@@ -205,10 +190,11 @@ class brNodeServer:
 
         while self.shutdown is False:
 
-            if len(self.pendingConnect) > 0:
+            if self.nodeManager.getConnectionRequest():
 
-                with self.connPoolLock:
-                    outboundConnect = self.pendingConnect.pop()
+                route = self.nodeManager.getConnectionRequest(pop=True)
+
+
                 
                 outboundIP = outboundConnect.thirdParty.nodeIP
                 outboundPort = outboundConnect.thirdParty.nodePort
@@ -336,7 +322,7 @@ class brNodeServer:
         elif packet.messageType == brPacket.brMessageType.CALLBACK_PING:
             return True
 
-    def __connectionThread__(self, nodeRoute:brRoute, mode:str):
+    def __connectionThread__(self, nodeRoute:brRoute):
 
         netAddress = nodeRoute.thirdParty.nodeIP
         netPort = nodeRoute.thirdParty.nodePort
