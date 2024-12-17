@@ -192,29 +192,22 @@ class brNodeServer:
 
             if self.nodeManager.getConnectionRequest():
 
-                route = self.nodeManager.getConnectionRequest(pop=True)
-
-
-                
-                outboundIP = outboundConnect.thirdParty.nodeIP
-                outboundPort = outboundConnect.thirdParty.nodePort
+                nodeAddress:tuple = self.nodeManager.getConnectionRequest(pop=True)
 
                 try:
                     obsoc = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                     logger.debug("Attempting to connect to node...")
-                    obsoc.connect((outboundIP, outboundPort))
-                    outboundConnect.assignedConn = obsoc
-                    spawnThread = threading.Thread(name=f'brNodeCon-outbound-({outboundIP})',target=self.__connectionThread__, args=[outboundConnect, "outbound"])
+                    obsoc.connect(nodeAddress)
+                    route:brRoute = self.nodeManager.acceptConnection(obsoc, nodeAddress, initiatedConnection=True)
+                    spawnThread = threading.Thread(name=f'brNodeCon-outbound-({route.thirdParty.nodeIP})',target=self.__connectionThread__, args=[route])
                     self.outboundNodeThreads.append(spawnThread)
                     spawnThread.start()
                     logger.debug("Connected.")
                 except ConnectionRefusedError:
-                    with self.thrLock:
-                        self.failedToConnect.append(outboundConnect)
+                    self.nodeManager.submitFailedRoute(nodeAddress)
                     logger.exception("Cannot connect to node! Connection refused!", exc_info=False)
                 except:
-                    with self.thrLock:
-                        self.failedToConnect.append(outboundConnect)
+                    self.nodeManager.submitFailedRoute(nodeAddress)
                     logger.exception("Connection error!", exc_info=True)
             else:
 
@@ -327,6 +320,8 @@ class brNodeServer:
         netAddress = nodeRoute.thirdParty.nodeIP
         netPort = nodeRoute.thirdParty.nodePort
         connection = nodeRoute.assignedConn
+
+        nodeRoute.routeHandshake(self.insecurePort, self.nodePort)
 
         # Statistics gathering
         ourHandledBytes = 0
