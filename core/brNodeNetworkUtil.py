@@ -92,27 +92,6 @@ class brRoute:
         self.newOutgoing = False
         self.outbox = []
         self.routeState = "Unknown"
-
-    def isHandShakeComplete(self):
-        return self.thirdParty.finishedHandshake
-    
-    def setHandShakeComplete(self):
-        with self.routeThreadLock:
-            self.thirdParty.finishedHandshake = True
-
-    def setConnectedState(self, state:bool):
-        with self.routeThreadLock:
-            self.thirdParty.connected = state
-
-    def thirdPartyPubKeyCheck(self):
-        # Just make sure we have the other parties Public key.
-        if self.thirdParty.identity == None:
-            if self.thirdParty.queryPubKey():
-                return True
-            else:
-                return False
-        else:
-            return True
                 
     def setRouteStateIdle(self):
         with self.routeThreadLock:
