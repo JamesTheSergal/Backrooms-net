@@ -118,3 +118,32 @@ class brPacket:
 
         packet = messageType + version + self.data
         return packet
+    
+    def createIntroPacket():
+        packet = brPacket()
+        packet.setMessageType(brPacket.brMessageType.INTRODUCE)
+        return packet
+    
+    def createInfoPacket(name:str, value:str):
+        packet = brPacket()
+        packet.setMessageType(brPacket.brMessageType.NODE_INFO)
+        data = f'{name}:{value}'.encode('utf-8')
+        packet.data = data
+        return packet
+    
+    def createReadyPacket():
+        packet = brPacket()
+        packet.setMessageType(brPacket.brMessageType.READY)
+        return packet
+    
+    def createChallengeResponsePacket(data:bytes):
+        packet = brPacket()
+        packet.data = data
+        packet.setMessageType(brPacket.brMessageType.CHALLENGE_RES)
+        return packet
+    
+    def createChallengePacket(data:bytes):
+        packet = brPacket()
+        packet.data = data
+        packet.setMessageType(brPacket.brMessageType.CHALLENGE)
+        return packet
