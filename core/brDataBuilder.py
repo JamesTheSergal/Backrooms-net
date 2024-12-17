@@ -104,12 +104,9 @@ class brPacket:
         else:
             pass # Raise exception 
 
-    def setMessageVersion(self, version:str):
-        self.version = version.encode("utf-8").ljust(14, b'\0')
-
-    def buildPacket(self):
+    def buildPacket(self) -> bytes:
         messageType = self.messageType.to_bytes(1, byteorder='little')
-        version = self.version
+        version = self.version.encode("utf-8").ljust(14, b'\0')
         # Pre-flight check
 
         if len(messageType) != 1:
