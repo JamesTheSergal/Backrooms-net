@@ -56,19 +56,26 @@ class brPacket:
 
         # First phase introduction
         INTRODUCE = 0
-        CHALLENGE = 1
-        CHALLENGE_RES = 2
+        READY = 1
+        NODE_INFO = 2       # Used to exchange info about the node. One way.
+        CHALLENGE = 3
+        CHALLENGE_RES = 4
 
+        # Encryption
+        ENCR_COMMS = 5      # Sent when nodes finally upgrade to encrypted communications
+
+        # Utility
+        ASK_FOR_FRIENDS = 6
+        FRIEND_ANNOUNCE = 7
+        PING = 8
+        CALLBACK_PING = 9   # Absolute Solver - Used to provide a window for response
+        UR_BEHIND_NAT = 10  # Message type to send when we think a remote node is behind a NAT.
+
+        # Message Handling
+        NEW_MESSAGE = 11    # Packet will contain the number of packets after this one to be received
+        READY_MESSAGE = 12  # Response that we are ready to receive sequence
+        MESSAGE = 13        # Data to receive
         
-        ENCR_COMMS = 3      # Sent when nodes finally upgrade to encrypted communications
-        NODE_INFO = 4       # Used to exchange info about the node. One way.
-        ASK_FOR_FRIENDS = 5
-        FRIEND_ANNOUNCE = 6
-        PING = 7
-        CALLBACK_PING = 8   # Absolute Solver - Used to provide a window for response
-        NEW_MESSAGE = 9     # Packet will contain the number of packets after this one to be received
-        READY_MESSAGE = 10  # Response that we are ready to receive sequence
-        MESSAGE = 11        # Data to receive
 
     def decompile(receivedPacket:bytes):
 
