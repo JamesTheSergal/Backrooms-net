@@ -151,3 +151,8 @@ class brPacket:
         packet.data = data
         packet.setMessageType(brPacket.brMessageType.CHALLENGE)
         return packet
+    
+    def createEncrCommsPacket():
+        packet = brPacket()
+        packet.setMessageType(brPacket.brMessageType.ENCR_COMMS)
+        return packet

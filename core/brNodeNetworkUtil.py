@@ -121,12 +121,12 @@ class brRoute:
         with self.routeThreadLock:
             self.controllerLastSeen = time.time()
 
-    def updateSecret(self):
-        if self.encryptionUpgraded == False and 
+    #def updateSecret(self):
+    #    if self.encryptionUpgraded == False and 
 
     def routeHandshake(self, insecurePort:int, nodePort:int):
 
-        def receiveAndDecompile() -> brPacket:
+        def receiveAndDecompile():
             try:
                 received = self.assignedConn.recv(1024)
                 packet = brPacket.decompile(received)
@@ -229,11 +229,13 @@ class brRoute:
                 logger.error("Received packet in challenge phase was not a challenge response packet!")
                 return False
 
-
         def outgoingConnectionHandshake():
             # If we are outbound (AKA, reaching out to a node to make this route)
-            result = sendIntroAndWait()
+            result:brPacket = sendIntroAndWait()
 
+            if not result:
+                return False
+            
             # READY PHASE. Receive INFO packets until CHALLENGE Packet is received.
             if result.messageType == brPacket.brMessageType.READY:
 
@@ -249,13 +251,26 @@ class brRoute:
             if result.messageType == brPacket.brMessageType.CHALLENGE:
                 # Now that we have gotten node_info packets from the remote, we should be able to query the public key
                 if self.thirdParty.queryPublicKey() and processChallenge(result):
-                    pass
+                    challengeResponse:brPacket = receiveAndDecompile()
+                    if challengeResponse:
+                        pass
+                    else:
+                        logger.error("Error during handshake. Challenge response error!")
                 else:
                     logger.error("Error during handshake. Unable to get public key from remote node to complete challenge.")
                     return False
 
             else:
                 logger.error("Error during handshake. Unexpected packet type after NODE_INFO. (Should be challenge.)")
+                return False
+            
+            # ENCR COMMS PHASE
+            if challengeResponse.messageType == brPacket.brMessageType.ENCR_COMMS:
+                self.encryptionUpgraded = True
+                self.thirdParty.completedHandshake = True
+                return True
+            else:
+                logger.error("Unexpected packet! Expected ENCR Comms indicator!")
                 return False
 
         def incomingConnectionHandshake():
@@ -288,11 +303,29 @@ class brRoute:
                     return False
             else:
                 return False
+            
+            # ENCR COMMS PHASE
+            send = brPacket.createEncrCommsPacket()
+            self.assignedConn.send(send.buildPacket())
+            self.encryptionUpgraded = True
+            self.thirdParty.completedHandshake = True
+            return True
+
 
         if self.weInitiatedConnection:
-            outgoingConnectionHandshake()
+            if outgoingConnectionHandshake():
+                logger.info("Handshake with remote node was successful.")
+                return True
+            else:
+                logger.error("Handshake with remote node failed!")
+                return False
         else:
-            incomingConnectionHandshake()
+            if incomingConnectionHandshake():
+                logger.info("Handshake from incoming remote node was successful.")
+                return True
+            else:
+                logger.error("Handshake with incoming remote node failed!")
+                return False
 
 
 
@@ -320,8 +353,9 @@ class brNodeManager():
             testRoute.weInitiatedConnection = initiatedConnection
             testRoute.enclaveInstance = self.enc
             newNode.addRoute(testRoute)
-            self.nodes[address[0]] = newNode
-            self.routes[newNode] = testRoute
+            with self.thrLock:
+                self.nodes[address[0]] = newNode
+                self.routes[newNode] = testRoute
             return testRoute
         else:
             node:brNode = self.nodes[address[0]]
