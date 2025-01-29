@@ -1,9 +1,63 @@
 import logging
+import subprocess
+import os
 from pathlib import Path
 import time
 import platform 
-import uuid
-import hashlib
+
+# Check Python Version
+current_version = platform.python_version_tuple()
+if current_version[0] == '3' and int(current_version[1]) <= 10:
+    logging.critical("Python 3.11 or greater is required to run this application.")
+    exit()
+
+# For the off chance
+if current_version[0] != '3':
+    logging.critical("Python 3.11 or greater is required to run this application.")
+    exit()
+    
+def autoVenv():
+    venvcreated = False
+    
+    if os.path.exists('venv'):
+        print("Found existing venv...")
+    else:
+        try:
+            print("Creating venv...")
+            subprocess.run(['python3', '-m', 'venv', 'venv'], check=True)
+            print("Created virtual eviroment...")
+            venvcreated = True
+        except Exception as e:
+            print(f"Failed to create virtual enviroment! You may need to create one yourself! Error: {e}")
+            exit()
+        
+    # Add script for Windows later
+    activate_script = "bash venv/bin/activate"
+    try:
+        print("Activating venv...")
+        subprocess.run(activate_script, shell=True, check=True)
+        print("venv is active.")
+        
+    except Exception as e:
+        print(f"Failed to activate venv! Error: {e}")
+        exit()
+    
+    if venvcreated:
+        print("Running pip to install required packages.")
+        try:
+            subprocess.run(['venv/bin/pip', 'install', '-r', 'requirements.txt'])
+        except Exception as e:
+            print(f"pip process failed while installing required packages! Error: {e}")
+            exit()
+    
+    print("Finished setup.")
+    
+    if venvcreated:
+        print("Setup was completed, please restart the program.")
+        exit()
+    
+autoVenv()
+
 from core import BR_VERSION
 from core import loggingfactory
 from core import notrustvars as enc
@@ -26,6 +80,9 @@ def publishNodeServerStats(localenc:enc.enclave, nodeServer: brNodeNetworkCore.b
     localenc.updateEntry("brNodeNetwork_incomingBytes", nodeServer.handledIncomingBytes)
     localenc.updateEntry("brNodeNetwork_outgoingBytes", nodeServer.handledOutgoingBytes)
     localenc.updateEntry("brNodeNetwork_requests", nodeServer.respondedToRequests)
+    
+
+        
 
 def node():
 
