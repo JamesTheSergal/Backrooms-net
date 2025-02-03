@@ -8,6 +8,7 @@ import uuid
 import requests
 from core import loggingfactory, notrustvars
 from core.brDataBuilder import brPacket
+from core.brNodeNetworkHandshake import alpha0001_handshake
 
 logger = loggingfactory.createNewLogger("brNodeNetwork")
 
@@ -311,6 +312,7 @@ class brRoute:
             self.thirdParty.completedHandshake = True
             return True
 
+        
 
         if self.weInitiatedConnection:
             if outgoingConnectionHandshake():
