@@ -1,7 +1,7 @@
 from core.brWebCore import brWebServer
 from core.brWebCore import brWebPage
 from core.notrustvars import enclave
-from core.loggingfactory import timeProfiler
+from core.Logging.loggingfactory import timeProfiler
 from node import BR_VERSION
 import threading
 import uuid

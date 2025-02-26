@@ -6,7 +6,8 @@ import time
 import uuid
 
 import requests
-from core import loggingfactory, notrustvars
+from core import notrustvars
+from core.Logging import loggingfactory
 from core.brDataBuilder import brPacket
 from core.brNodeNetworkHandshake import alpha0001_handshake
 
@@ -148,7 +149,7 @@ class brRoute:
             
             return receiveAndDecompile()
 
-        def processInfoPacket(packet: brPacket):
+        def processInfoPacket(packet: brPacketbrPacket):
             thirdPartyData = packet.data
             try:
                 decodeData = thirdPartyData.decode('utf-8')
@@ -182,7 +183,7 @@ class brRoute:
                 logger.exception("Error while sending challenge to remote node!", exc_info=True)
                 return False
 
-        def processChallenge(packet:brPacket):
+        def processChallenge(packet:brPbrPacketacket):
             try:
                 decrypted = self.enclaveInstance.assignedIdentity.decryptChunk(packet.data)
                 sendback = self.thirdParty.identity.chunkEncrypt(decrypted)

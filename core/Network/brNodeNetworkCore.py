@@ -9,7 +9,8 @@ import threading
 import time
 import uuid
 import requests
-from core import loggingfactory, notrustvars
+from core import notrustvars
+from core.Logging import loggingfactory
 from core.brNodeNetworkUtil import brNodeManager, brRoute
 from core.brDataBuilder import brPacket
 #from node import BR_VERSION

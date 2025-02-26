@@ -1,6 +1,6 @@
 from enum import IntEnum
 import pprint
-from . import BR_VERSION
+from .. import BR_VERSION
 
 
 class brPacket:

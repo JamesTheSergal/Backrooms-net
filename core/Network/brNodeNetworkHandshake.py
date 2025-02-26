@@ -1,5 +1,5 @@
 import socket
-from core import loggingfactory
+from core.Logging import loggingfactory
 from core.brDataBuilder import brPacket
 
 logger = loggingfactory.createNewLogger("brNodeNetwork")
@@ -36,9 +36,9 @@ class alpha0001_handshake:
             self.receive()
 
     def initiate(self):
-        packet = commonNetworkFunctions.receiveAndDecompile(connection)
+        commonNetworkFunctions.sendIntroAndWait(self.connection)
         
         
     def receive(self):
-        pass
+        packet = commonNetworkFunctions.receiveAndDecompile(self.connection)
 

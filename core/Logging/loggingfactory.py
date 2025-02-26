@@ -14,7 +14,7 @@ def setDefault():
             ]
     )
 
-def createNewLogger(name, path="./", level=logging.DEBUG):
+def createNewLogger(name, path="./", level=logging.INFO):
 
     defaultformat = logging.Formatter(
         "{asctime}.{msecs} - [{thread} {module}.{funcName}:({lineno})] - [{levelname}] - {message}",
@@ -26,7 +26,8 @@ def createNewLogger(name, path="./", level=logging.DEBUG):
     if name not in logging.Logger.manager.loggerDict:
         logger = logging.getLogger(name)
 
-        logger.setLevel(level)
+        if level != logging.INFO:
+            logger.setLevel(level)
         logger.propagate = False
 
         file_handler = logging.FileHandler(f'{path+name}.log', mode='a')
