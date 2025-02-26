@@ -59,13 +59,13 @@ def autoVenv():
 autoVenv()
 
 from core import BR_VERSION
-from core import loggingfactory
-from core import notrustvars as enc
-from core import brWebCore
-from core import brNodeNetworkCore
-from core import brWebElements
-from core import consolefancy
-from core import settings
+from core.Logging import loggingfactory
+from core.brSecurity import notrustvars as enc
+from core.brWebServer import brWebCore
+from core.brNetwork import brNodeNetworkCore
+from core.brWebServer import brWebElements
+from core.brTerminal import consolefancy
+from core.LocalExe import settings
 
 
 
