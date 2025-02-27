@@ -1,0 +1,2 @@
+import addonManager
+import baseAddon
