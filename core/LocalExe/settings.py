@@ -3,11 +3,11 @@ import configparser
 
 class brSettings():
 
-    def __init__(self):
+    def __init__(self, name="BR.conf", path="./"):
         self.settingsExisted = False
         self.settingsObj:configparser.ConfigParser = None
 
-        if not os.path.isfile("BR.conf"):
+        if not os.path.isfile(path+name):
             settings = configparser.ConfigParser()
             settings['network'] = {
                 'bind-address': '127.0.0.1',
@@ -21,7 +21,7 @@ class brSettings():
                 'anon-logging': True
             }
 
-            with open("BR.conf", 'w') as configfile:
+            with open(path+name, 'w') as configfile:
                 settings.write(configfile)
             
             self.settingsObj = settings
@@ -41,3 +41,6 @@ class brSettings():
     
     def getBoolSetting(self, cfgsection:str, item:str):
         return self.settingsObj.getboolean(cfgsection, item)
+    
+    
+
