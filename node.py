@@ -65,7 +65,7 @@ from core.brWebServer import brWebCore
 from core.brNetwork import brNodeNetworkCore
 from core.brWebServer import brWebElements
 from core.brTerminal import consolefancy
-from core.LocalExe import settings
+from core.PLV import settings
 
 
 

@@ -1,12 +1,10 @@
-BR_VERSION = "0.0.1-alpha"
-PLV_VERSION = "0.0.1-alpha" # Project launch vehicle
-SUPPORTED_HANDSHAKES = ["0.0.1-alpha"]
-
-# Always logging first
-import core.Logging
-import core.addonSystem
-
+# Import core first and let PLV work itself out.
+import core
+# Import our default backup logger config
+import PLV.Logging
 # Attempt to call for a global logger to get this show on the road
-core_logger = core.Logging.createNewLogger("node.log")
-core_logger.info(f"Backroom-net Core version: {BR_VERSION}")
+core_logger = PLV.Logging.classic.createNewLogger("main.log")
 core_logger.info(f"Platform Launch Vehicle (PLV) version: {PLV_VERSION}")
+
+# Now import security 
+import Security
