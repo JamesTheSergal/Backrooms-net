@@ -1,0 +1,1 @@
+from loggingfactory import createNewLogger
