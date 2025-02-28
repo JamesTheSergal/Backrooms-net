@@ -7,5 +7,8 @@ from core.PLV import Logging, Scheduler, AddonSystem
 core_logger = PLV.Logging.classic.createNewLogger("main.log")
 core_logger.info(f"Platform Launch Vehicle (PLV) version: {PLV.PLV_VERSION}")
 
+core_logger.info("Attempting BootStrap assistance...")
+from core.smartBootStrap import bootStrap
+bootStrap()
 # Now import security 
-import Security
+import core.Security
