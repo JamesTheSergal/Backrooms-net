@@ -18,6 +18,9 @@ def find_packages(directory):
                 # Remove the __init__.py from the path and append to the list
                 package_path = os.path.relpath(root, directory)
                 packages.append(package_path.replace(os.sep, '.'))
+
+            if '__info__.py' in files:
+                console.print(f"Found a PLV compatible Addon! ({root})")
             
             status.update(status=f'Scanning modules... ({root})')
             time.sleep(0.15)
