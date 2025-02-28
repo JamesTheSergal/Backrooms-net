@@ -1,12 +1,13 @@
-from core import core_logger as logger
+from core.PLV import PLVGlobalLogger as logger
 import multiprocessing
 import threading
 
 logger.info("Initilizing the task scheduler now...")
 
-from schedType import threadstandard
-from schedType import mpsched
-from schedType import concurrentWaiter
+
+from core.PLV.Scheduler.schedType import threadstandard
+from core.PLV.Scheduler.schedType import mpsched
+from core.PLV.Scheduler.schedType import concurrentWaiter
 
 class SchedulerRunnablePointer:
     

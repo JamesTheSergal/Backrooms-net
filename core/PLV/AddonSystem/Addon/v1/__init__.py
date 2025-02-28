@@ -1,3 +1,3 @@
-from Addon import logger
+from core.PLV import PLVGlobalLogger as logger
 
-import properties
+#import properties

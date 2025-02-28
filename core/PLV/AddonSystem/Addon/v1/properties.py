@@ -1,3 +1,4 @@
+import dataclasses
 from typing import List, Tuple
 from dataclasses import dataclass
 
@@ -21,13 +22,13 @@ class ExternalDependencies:
     
     
     # expected to be a name and version number
-    package:List[Tuple[str, str]] = []
-    satisfaction:bool
+    package:List[Tuple[str, str]] = dataclasses.field(default_factory=list)
+    satisfaction:bool = False
     
 @dataclass
 class InternalDependancies:
     # This is a PLV Addon. So, if SMSQL needs another locally installed PLV addon.
     
     # expected to be a name and version number
-    package:List[Tuple[str, str]] = []
-    satisfaction:bool
+    package:List[Tuple[str, str]] = dataclasses.field(default_factory=list)
+    satisfaction:bool = False

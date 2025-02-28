@@ -1,1 +1,1 @@
-from loggingfactory import createNewLogger
+from core.PLV.Logging.classic.loggingfactory import createNewLogger
