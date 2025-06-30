@@ -4,18 +4,6 @@ from pathlib import Path
 
 import Enclave
 
-# Check for temp directory
-tempdir = Path("temp/")
-if tempdir.is_dir():
-    pass
-else:
-    try:
-        os.mkdir("temp/")
-    except OSError:
-        logging.error("Couldn't create temp directory!", exc_info=True)
-    except Exception as e:
-        logging.error("Unknown error when creating temp directory!", exc_info=True)
-
 
 brEnclFormat = logging.Formatter(
         "{asctime}.{msecs} - [{thread} {module}.{funcName}:({lineno})] - [{levelname}] - {message}",

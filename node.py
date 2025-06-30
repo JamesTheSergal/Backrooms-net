@@ -4,16 +4,13 @@ import time
 import platform 
 import uuid
 import hashlib
-from core import loggingfactory
+from brCore import loggingfactory
 from core import notrustvars as enc
 from core import brWebCore
 from core import brNodeNetworkCore
 from core import brWebElements
 from core import consolefancy
 from core import settings
-
-
-BR_VERSION = "0.0.1-alpha"
 
 
 def publishWebServerStats(localenc:enc.enclave, webServer: brWebCore.brWebServer):
