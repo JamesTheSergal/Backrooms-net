@@ -1,4 +1,4 @@
-from core.brWebCore import brWebServer
+import brCore.brWebServer 
 from node import BR_VERSION
 
 def defaultFourOhFour(context: brWebServer.packetParser):

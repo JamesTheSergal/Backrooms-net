@@ -7,9 +7,9 @@ import uuid
 import os
 from chardet.universaldetector import UniversalDetector
 import mimetypes
-from core import loggingfactory
+from . import brWeb
 
-logger = loggingfactory.createNewLogger("brWebCore")
+logger = brWeb
 
 
 class brWebServer:
@@ -444,7 +444,7 @@ class brWebServer:
 
             # Imports for various defaults
             # We import here to avoid a circular import error
-            from core import brWebDefaults  
+            from brCore.brWebServer import brWebDefaults  
 
             logger.warning("No custom 404 route set - using default...")
             self.buildRoute("404", "/404", brWebDefaults.defaultFourOhFour)
@@ -546,7 +546,7 @@ class brWebServer:
     def __handleServerError__(self):
 
         # Imports for various defaults
-        from core import brWebDefaults
+        from brCore.brWebServer import brWebDefaults
 
         reply: brWebServer.requestResponse = brWebDefaults.defaultServerError()
         packet = reply.setContentType("500").setBodySize().buildPacket()
