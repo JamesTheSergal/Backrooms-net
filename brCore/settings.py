@@ -9,16 +9,22 @@ class brSettings():
 
         if not os.path.isfile("BR.conf"):
             settings = configparser.ConfigParser()
+            
+            # Defaults
             settings['network'] = {
                 'bind-address': '127.0.0.1',
-                'webresponder-port': 80,
-                'brNode-port': 443,
+                'webresponder-port': 23332,
+                'brNode-port': 23334,
                 'friendly-node-name': 'autogen'
             }
-            settings['security'] = {
-                'debug': True,
+            settings['enclave'] = {
                 'enclave-name': "000_default",
-                'anon-logging': True
+                'dump-enclave-at-exit': False
+                
+            }
+            settings['logging'] = {
+                'globalLogLevel': "info",
+                'enclaveLogLevel': "info"
             }
 
             with open("BR.conf", 'w') as configfile:
