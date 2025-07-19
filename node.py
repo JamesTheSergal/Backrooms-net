@@ -5,12 +5,13 @@ import platform
 import uuid
 import hashlib
 from brCore import loggingfactory
-from core import notrustvars as enc
-from core import brWebCore
-from core import brNodeNetworkCore
-from core import brWebElements
-from core import consolefancy
-from core import settings
+from brCore import notrustvars as enc
+from brCore.brWebServer import brWebCore
+from brCore import printstartfancy
+from brCore import settings
+from brCore import brNodeNetworkCore
+from brCore import brWebElements
+from brCore import BR_VERSION
 
 
 def publishWebServerStats(localenc:enc.enclave, webServer: brWebCore.brWebServer):
@@ -28,7 +29,7 @@ def publishNodeServerStats(localenc:enc.enclave, nodeServer: brNodeNetworkCore.b
 def node():
 
     # Print our fancy thing
-    consolefancy.printstartfancy(BR_VERSION)
+    printstartfancy(BR_VERSION)
     loggingfactory.setDefault()
     logging.info("Node initilization...")
 
