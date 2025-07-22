@@ -1,5 +1,6 @@
 import os
 import configparser
+from names_generator import generate_name
 
 class brSettings():
 
@@ -15,7 +16,8 @@ class brSettings():
                 'bind-address': '127.0.0.1',
                 'webresponder-port': 23332,
                 'brNode-port': 23334,
-                'friendly-node-name': 'autogen'
+                'brDHT-port': 23338,
+                'friendly-node-name': generate_name(style="underscore")
             }
             settings['enclave'] = {
                 'enclave-name': "000_default",
