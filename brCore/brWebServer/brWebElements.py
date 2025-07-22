@@ -1,8 +1,8 @@
 from brCore.brWebServer.brWebCore import brWebServer
 from brCore.brWebServer.brWebCore import brWebPage
-from brCore import notrustvars
+from brCore.brEnclave.notrustvars import enclave
 from brCore.loggingfactory import timeProfiler
-from node import BR_VERSION
+from brCore import BR_VERSION
 import threading
 import uuid
 

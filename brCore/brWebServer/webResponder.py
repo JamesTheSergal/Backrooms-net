@@ -5,11 +5,11 @@ import os
 import socket
 import threading
 import uuid
-import pyqrcode
+#import pyqrcode
 import pprint
-from core import notrustvars
+from brCore.brEnclave import notrustvars
 
-from node import BR_VERSION
+from brCore import BR_VERSION
 
 class webResponderRequest:
 

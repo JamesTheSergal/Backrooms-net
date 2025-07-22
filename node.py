@@ -1,9 +1,6 @@
 import logging
 from pathlib import Path
 import time
-import platform 
-import uuid
-import hashlib
 from brCore import loggingfactory
 from brCore import notrustvars as enc
 from brCore.brWebServer import brWebCore

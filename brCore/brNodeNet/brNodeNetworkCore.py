@@ -9,7 +9,8 @@ import threading
 import time
 import uuid
 import requests
-from core import loggingfactory, notrustvars
+from brCore import brWebLog
+from brCore.brEnclave import notrustvars
 #from node import BR_VERSION
 
 BR_VERSION = "0.0.1-alpha"
@@ -56,7 +57,7 @@ BR_VERSION = "0.0.1-alpha"
 
 
 
-logger = loggingfactory.createNewLogger("brNodeNetwork")
+logger = brWebLog
 
 class brPacket:
 

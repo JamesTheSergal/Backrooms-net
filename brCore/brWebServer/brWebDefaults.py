@@ -1,5 +1,5 @@
-import brCore.brWebServer 
-from node import BR_VERSION
+from brCore.brWebServer.brWebCore import brWebServer
+from brCore import BR_VERSION
 
 def defaultFourOhFour(context: brWebServer.packetParser):
     targetPath = context.requestPath

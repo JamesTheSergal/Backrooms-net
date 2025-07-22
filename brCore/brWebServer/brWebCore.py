@@ -7,9 +7,9 @@ import uuid
 import os
 from chardet.universaldetector import UniversalDetector
 import mimetypes
-from . import brWeb
+from . import brWebLog
 
-logger = brWeb
+logger = brWebLog
 
 
 class brWebServer:
