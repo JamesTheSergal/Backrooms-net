@@ -23,7 +23,7 @@ def matchLogLevel(strLevel:str, ):
             print("Log level not recognized. Defaulting to info.")
             return logging.INFO
 
-setLogLevel = brCoreSettings.getBoolSetting("logging", "globalLogLevel")
+setLogLevel = brCoreSettings.getStrSetting("logging", "globalLogLevel")
 logLevel = matchLogLevel(setLogLevel)
 
 
@@ -54,17 +54,18 @@ brSecurityLog = createNewLogger("brSecurity", "temp/", level=logLevel)
 brAgentLog = createNewLogger("brNodeAgent", "temp/", level=logLevel)
 brServeLog = createNewLogger("brNodeServe", "temp/", level=logLevel)
 brNodeHsLog = createNewLogger("brNodeHandshakes", "temp/", level=logLevel)
+brDHTLog = createNewLogger('kademlia', "temp/", level=logLevel)
 
 
 # Console thing
-from brCore import consolefancy
-from consolefancy import printstartfancy
+from brCore.consolefancy import printstartfancy
 
 # Sockets and network
 import brCore.brSockets
 from brCore.brSockets.brNodeAgent import brSocketAgent
 import brCore.brNodeNet
 from brCore.brNodeNet import brNodeNetworkCore
+from brCore.brNodeNet.brDHT import brDHT
 
 # Enclave
 import brCore.brEnclave
