@@ -1,6 +1,7 @@
 import re
 import asyncio
 from queue import Queue
+import time
 from brCore.brNodeNet import brDHTLog as log
 from kademlia.network import Server
 from threading import Thread
@@ -37,52 +38,46 @@ class brDHT:
     def __init__(self, serverport:int):
         self.serverport = serverport
         self.dhtServer = None
-        self.asyncloop = None
+        self.asyncloop = asyncio.get_event_loop()
         self.bootstraplist = dht_file_read()
         self.shutdown = False
         self.dhtThread = None
         self.outbox = Queue(maxsize=2500)
         self.requestbox = Queue(maxsize=2500)
-    
-    def start(self):
-        self.dhtThread = Thread(target=brDHT.dht_thread, args=[self])
-        self.dhtThread.start()
-    
-    def stop(self):
-        self.shutdown = True
-        log.info("Waiting for DHT thread to finish...")
-        self.asyncloop.stop()
-        self.dhtThread.join()
-        log.info("DHT closed.")
+        self.requestresults = {}
+        
+        # Async specific stuff
+        self.asyncloop.set_debug(True)
+        self.dhtServer = Server()
+        self.asyncloop.run_until_complete(self.dhtServer.listen(self.serverport))
+        
+        self.asyncloop.create_task(self.request_loop())
+        if len(self.bootstraplist) == 0:
+            log.info("No bootstrap nodes in list. Starting up alone...")
+        else:
+            log.info("Boot strapping DHT server...")
+            self.asyncloop.run_until_complete(self.dhtServer.bootstrap(self.bootstraplist))
     
     async def getRequest(self, key):
         result = await self.dhtServer.get(key)
         return result
     
-    async def setRequest(self, key, data):
-        result = await self.dhtServer.set(key, data)
-        return result
+    def setRequest(self, key, data):       
+        self.outbox.put((key, data))
+ 
     
-    def dht_thread(self):
-        log.info("DHT thread starting...")
-        asyncio.loop
-        loop = asyncio.get_event_loop()
-        loop.set_debug(True)
-        
-        self.dhtServer = Server()
-        loop.run_until_complete(self.dhtServer.listen(self.serverport))
-        
-        if len(self.bootstraplist) == 0:
-            log.info("No bootstrap nodes in list. Starting up alone...")
-        else:
-            loop.run_until_complete(self.dhtServer.bootstrap(self.bootstraplist))
+    async def request_loop(self):
+        log.info("Request processor for DHT has opened.")
+        while self.shutdown == False:
+            if self.requestbox.qsize() != 0:
+                request = self.requestbox.get()
+                result = await self.dhtServer.get(request)
+                self.requestresults[request] = result
             
-        try:
-            log.info("Loop is running...")
-            loop.run_forever()
-        except KeyboardInterrupt:
-            pass
-        finally:
-            self.dhtServer.stop()
-            loop.close()
-            log.info("DHT is shutdown.")
+            elif self.outbox.qsize() != 0:
+                key, data = self.outbox.get()
+                await self.dhtServer.set(key, data)
+                log.info(f"DHT: Sent key: {key}")
+            else:
+                await asyncio.sleep(1)
+        log.info("Request processor is exiting due to shutdown signal.")
