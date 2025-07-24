@@ -5,6 +5,7 @@ import logging
 import ctypes  # For secure_zero_memory
 
 from . import brEnclaveLog  # Assuming this is your logger
+from .Encryption import (encryptLocalData, decryptLocalData, getNewSalt, derive_key, destroyData, getMachineSHA256)
 
 class Identity:
     """Base Identity class for brNodes (RSA handling)."""
@@ -69,7 +70,7 @@ class Identity:
             Bytes: Clear unencrypted data
         """
         if borrow is True:
-            pk = pickle.loads(self.decryptLocalData(self.privateKey, self.iv, self.salt))  # NOTE: Assumes decryptLocalData is imported from Encryption.py; we'll handle that in imports.
+            pk = pickle.loads(decryptLocalData(self.privateKey, self.iv, self.salt))  # NOTE: Assumes decryptLocalData is imported from Encryption.py; we'll handle that in imports.
             clearData = rsa.decrypt(data_obj, pk)
             # pk = self.destroyData(pk)  # TODO: Fix this as per original note; currently commented to avoid breakage.
             return clearData
@@ -92,17 +93,17 @@ class Identity:
             logging.error("Attempted to lock Identity while it is in the locked state!")
         else:
             if self.salt == None:
-                self.salt = self.getNewSalt()  # NOTE: Assumes getNewSalt from Encryption.py.
-            self.iv, self.privateKey = self.encryptLocalData(pickle.dumps(self.privateKey), self.salt)
+                self.salt = getNewSalt()  # NOTE: Assumes getNewSalt from Encryption.py.
+            self.iv, self.privateKey = encryptLocalData(pickle.dumps(self.privateKey), self.salt)
             self.islocked = True
     
     def unlockIdentity(self):
         """Unlocks the Identity (Only RSA private key) in memory to be used by decryption methods.
         """
         if self.islocked:
-            clearData = self.decryptLocalData(self.privateKey, self.iv, self.salt)
+            clearData = decryptLocalData(self.privateKey, self.iv, self.salt)
             self.privateKey = pickle.loads(clearData)
-            clearData = self.destroyData(clearData)  # NOTE: destroyData needs to be moved/imported; I'll put it in Encryption.py as a util.
+            clearData = destroyData(clearData)  # NOTE: destroyData needs to be moved/imported; I'll put it in Encryption.py as a util.
             self.islocked = False
         else:
             logging.error("Attempted to unlock Identity in the unlocked state!")
