@@ -75,3 +75,6 @@ from brCore.brEnclave import Enclave
 # Web server
 import brCore.brWebServer
 from brCore.brWebServer import brWebCore, brWebDefaults, brWebElements, webResponder
+
+# Establish the main Enclave for the node
+mainEnclave = Enclave("main")

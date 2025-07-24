@@ -12,6 +12,7 @@ def minimal():
     # Load our settings
     nodeSettings = brCore.settings.brSettings()
 
+    # Tell user to update settings
     if not nodeSettings.settingsExisted:
         logging.warning("Settings did not exist on startup. 'BR.conf' has been created. Please check the values and restart.")
         exit()
@@ -21,17 +22,15 @@ def minimal():
     friendlyName = nodeSettings.getStrSetting('network', 'friendly-node-name')
     DHTPort = nodeSettings.getIntSetting('network', 'brDHT-port')
     
-    minclave = Enclave("main")
-    
     mainDHT = brCore.brDHT(DHTPort)
     
     try:  
-            mainDHT.setRequest(friendlyName, "Hello")
-            mainDHT.asyncloop.run_forever()
+        mainDHT.setRequest(friendlyName, "Hello")
+        mainDHT.asyncloop.run_forever()
 
     except KeyboardInterrupt:
         logging.info("Got keyboard inturrupt.")
-        minclave.saveEnclaveFile(overwrite=True)
+        brCore.mainEnclave.saveEnclaveFile(overwrite=True)
         logging.info("Main thread exiting...")
 
 if __name__ == "__main__":
