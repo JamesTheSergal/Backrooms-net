@@ -2,6 +2,7 @@ import logging
 import time
 import brCore
 import asyncio
+from brCore import Enclave
 
 
 def minimal():
@@ -20,16 +21,17 @@ def minimal():
     friendlyName = nodeSettings.getStrSetting('network', 'friendly-node-name')
     DHTPort = nodeSettings.getIntSetting('network', 'brDHT-port')
     
-    mainDHT = brCore.brDHT(DHTPort)
-    mainDHT.start()
-
+    minclave = Enclave("main")
     
-    try:
-        while True:
-            time.sleep(5)
+    mainDHT = brCore.brDHT(DHTPort)
+    
+    try:  
+            mainDHT.setRequest(friendlyName, "Hello")
+            mainDHT.asyncloop.run_forever()
 
     except KeyboardInterrupt:
         logging.info("Got keyboard inturrupt.")
+        minclave.saveEnclaveFile(overwrite=True)
         logging.info("Main thread exiting...")
 
 if __name__ == "__main__":
