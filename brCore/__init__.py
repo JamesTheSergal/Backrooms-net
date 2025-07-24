@@ -70,6 +70,7 @@ from brCore.brNodeNet.brDHT import brDHT
 # Enclave
 import brCore.brEnclave
 from brCore.brEnclave import notrustvars
+from brCore.brEnclave import Enclave
 
 # Web server
 import brCore.brWebServer

@@ -1,2 +1,3 @@
+from .. import brEnclaveLog
 from brCore.brEnclave import notrustvars
-from brCore import brEnclaveLog
+from brCore.brEnclave.Enclave import Enclave
