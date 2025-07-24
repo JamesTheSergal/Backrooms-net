@@ -241,16 +241,16 @@ class Enclave:
         return True
             
     def insertData(self, key, obj):
-        with self.__threadLock:
-            if not self.isEncKey(key):
+        if not self.isEncKey(key):
+            with self.__threadLock:
                 self.__data[key] = obj
                 # Add hash on insert
                 data_hash = hashlib.sha256(pickle.dumps(obj)).hexdigest()
                 self.__dataHashes[key] = data_hash
                 self.__reverseHash[data_hash] = key
                 return True
-            else:
-                raise Enclave.enclaveValueExists(key)
+        else:
+            raise Enclave.enclaveValueExists(key)
     
     def returnData(self, key):
         if self.isEncKey(key):
