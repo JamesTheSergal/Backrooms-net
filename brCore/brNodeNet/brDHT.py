@@ -35,7 +35,7 @@ def dht_file_read():
     
 class brDHT:
     
-    def __init__(self, serverport:int):
+    def __init__(self, serverport:int, dhtid:int=None):
         self.serverport = serverport
         self.dhtServer = None
         self.asyncloop = asyncio.get_event_loop()
@@ -48,7 +48,11 @@ class brDHT:
         
         # Async specific stuff
         self.asyncloop.set_debug(True)
-        self.dhtServer = Server()
+        if dhtid:
+            self.dhtServer = Server(node_id=dhtid)
+        else:
+            self.dhtServer = Server()
+            
         self.asyncloop.run_until_complete(self.dhtServer.listen(self.serverport))
         
         self.asyncloop.create_task(self.request_loop())
