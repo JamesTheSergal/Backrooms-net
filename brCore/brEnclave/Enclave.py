@@ -169,18 +169,22 @@ class Enclave:
                 self.assignedIdentity = Identity()
                 encryptedPair:tuple = pickle.load(kf)
                 try:
+                    self.logger.debug("Attempting to decrypt and load key file...")
                     self.assignedIdentity.privateKey = pickle.loads(decryptLocalData(encryptedPair[1], encryptedPair[0], self.__salt))
                 except pickle.UnpicklingError:
                     self.logger.exception("Unable to decrypt enclave file! System changed/data corrupt/vector missing. Your data is not recoverable!", exc_info=True)
                     raise Enclave.enclaveIdentityError("Decryption failed")  # NOTE: Changed from exit() to raise, for better library behavior.
+                self.logger.debug("Success, locking data...")
                 self.assignedIdentity.lockIdentity()
 
+            self.logger.debug("Reading and decrypting Enclave file...")
             with open(location, 'rb') as ef:
                 encryptedList = pickle.load(ef)
             clearData = b''
             for chunk in encryptedList:
                 clearData += self.assignedIdentity.decryptChunk(chunk)
 
+            self.logger.debug("Reading and decrypting Enclave object data...")
             clearData = decryptLocalData(clearData, self.__vector, self.__salt)
 
             self.__data = pickle.loads(clearData)
@@ -256,9 +260,8 @@ class Enclave:
     
     def returnData(self, key):
         if self.isEncKey(key):
-            with self.__threadLock:
-                self.__verifyDataHash__(key)  # NOTE: Call verification on read for tamper detection.
-                return self.__data[key]
+            self.__verifyDataHash__(key)  # NOTE: Call verification on read for tamper detection.
+            return self.__data[key]
         else:
             raise Enclave.enclaveValueDoesNotExist(key)
 
