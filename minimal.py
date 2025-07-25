@@ -2,7 +2,7 @@ import logging
 import time
 import brCore
 import asyncio
-from brCore import Enclave
+from brCore import Enclave, mainDHT
 
 
 def minimal():
@@ -10,7 +10,7 @@ def minimal():
     logging.info("Node initilization...")
     
     # Load our settings
-    nodeSettings = brCore.settings.brSettings()
+    nodeSettings = brCore.brCoreSettings
 
     # Tell user to update settings
     if not nodeSettings.settingsExisted:
@@ -20,12 +20,9 @@ def minimal():
         pass
     
     friendlyName = nodeSettings.getStrSetting('network', 'friendly-node-name')
-    DHTPort = nodeSettings.getIntSetting('network', 'brDHT-port')
-    
-    mainDHT = brCore.brDHT(DHTPort)
     
     try:  
-        mainDHT.setRequest(friendlyName, "Hello")
+        mainDHT.setRequest(friendlyName, brCore.mainEnclave.returnData("PublicKey").save_pkcs1())
         mainDHT.asyncloop.run_forever()
 
     except KeyboardInterrupt:

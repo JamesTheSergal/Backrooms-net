@@ -78,3 +78,11 @@ from brCore.brWebServer import brWebCore, brWebDefaults, brWebElements, webRespo
 
 # Establish the main Enclave for the node
 mainEnclave = Enclave("main")
+
+# Establish the main DHT for the node
+if mainEnclave.isEncKey("DHTid"):
+    mainDHT = brDHT(brCoreSettings.getIntSetting('network', 'brDHT-port'), mainEnclave.returnData("DHTid"))
+else:
+    mainDHT = brDHT(brCoreSettings.getIntSetting('network', 'brDHT-port'))
+    mainEnclave.insertData("DHTid", mainDHT.dhtServer.node.id)
+    brDHTLog.info("Saved newly generated DHT ID to the Enclave.")
