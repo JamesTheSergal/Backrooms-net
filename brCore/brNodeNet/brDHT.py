@@ -38,7 +38,7 @@ class brDHT:
     def __init__(self, serverport:int, dhtid:int=None):
         self.serverport = serverport
         self.dhtServer = None
-        self.asyncloop = asyncio.get_event_loop()
+        self.asyncloop = asyncio.new_event_loop()
         self.bootstraplist = dht_file_read()
         self.shutdown = False
         self.dhtThread = None
