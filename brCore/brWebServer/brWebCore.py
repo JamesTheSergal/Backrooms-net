@@ -473,7 +473,7 @@ class brWebServer:
             self.running = False
             return
         
-        while self.shutdown is False:
+        while not self.shutdown:
             try:
                 connection, address = soc.accept()
                 spawnThread = threading.Thread(target=self.__connectionThread__, name="brWebCore-Thread", args=[connection, address])
