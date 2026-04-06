@@ -1,12 +1,18 @@
 from pathlib import Path
 import os
+import time
 
 # Core Version (Will be used to check versions of other nodes)
 BR_VERSION = "0.0.1-alpha"
 
+# Console thing
+from brCore.consolefancy import printstartfancy
+printstartfancy(BR_VERSION)
+
 # Import logging factory for global log creation
 import logging
 from .loggingfactory import setDefault, createNewLogger
+loggingfactory.setDefault()
 
 # Import settings class
 from .settings import brSettings
@@ -25,6 +31,31 @@ def matchLogLevel(strLevel:str, ):
 
 setLogLevel = brCoreSettings.getStrSetting("logging", "globalLogLevel")
 logLevel = matchLogLevel(setLogLevel)
+
+if not brCoreSettings.settingsExisted:
+    logging.warning("Settings did not exist on startup. 'BR.conf' has been created. Please check the values and restart.")
+    exit()
+else:
+    pass
+
+# Run several tests on settings
+debug = brCoreSettings.getBoolSetting('logging', 'debug')
+anonlog = brCoreSettings.getStrSetting('logging', 'anon-logging')
+
+if debug:
+    logging.warning("Debug is set to TRUE! (ONLY DO THIS IF YOU KNOW WHAT YOU ARE DOING!!!)")
+    logging.basicConfig(level=logging.DEBUG)
+else:
+    logging.basicConfig(level=logging.INFO)
+
+if debug == True and anonlog == True:
+    logging.critical(
+        "\n---- WARNING ----\n"
+        "Using DEBUG mode and using the anonymous logging mode at the same time can log data that\n"
+        "could be used to identify your machine! Please reconsider! (Thanks for the logs tho <3)\n"
+        "---- WARNING ----\n"
+    )
+    time.sleep(8)
 
 
 # Check for or create Temp dir
@@ -57,9 +88,6 @@ brNodeHsLog = createNewLogger("brNodeHandshakes", "temp/", level=logLevel)
 brDHTLog = createNewLogger('kademlia', "temp/", level=logLevel)
 
 
-# Console thing
-from brCore.consolefancy import printstartfancy
-
 # Sockets and network
 import brCore.brSockets
 from brCore.brSockets.brNodeAgent import brSocketAgent
@@ -77,7 +105,7 @@ import brCore.brWebServer
 from brCore.brWebServer import brWebCore, brWebDefaults, brWebElements, webResponder
 
 # Establish the main Enclave for the node
-mainEnclave = Enclave("main")
+mainEnclave = Enclave(brCoreSettings.getStrSetting('enclave','enclave-name'))
 
 # Establish the main DHT for the node
 if mainEnclave.isEncKey("DHTid"):
