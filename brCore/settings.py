@@ -12,6 +12,12 @@ class brSettings():
             settings = configparser.ConfigParser()
             
             # Defaults
+            settings['security'] = {
+                'enclave-name': "000_default",
+                'dump-enclave-at-exit': False
+                
+            }
+
             settings['network'] = {
                 'bind-address': '127.0.0.1',
                 'webresponder-port': 23332,
@@ -26,7 +32,9 @@ class brSettings():
             }
             settings['logging'] = {
                 'globalLogLevel': "info",
-                'enclaveLogLevel': "info"
+                'enclaveLogLevel': "info",
+                'debug': True,
+                'anon-logging': False
             }
 
             with open("BR.conf", 'w') as configfile:
