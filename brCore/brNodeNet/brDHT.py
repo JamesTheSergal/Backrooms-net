@@ -39,6 +39,7 @@ class brDHT:
         self.serverport = serverport
         self.dhtServer = None
         self.asyncloop = asyncio.new_event_loop()
+        self.asyncThread = Thread(name="DHT Server Thread", target=self.__runnerThread__, args=[])
         self.bootstraplist = dht_file_read()
         self.shutdown = False
         self.dhtThread = None
@@ -68,6 +69,10 @@ class brDHT:
     
     def setRequest(self, key, data):       
         self.outbox.put((key, data))
+
+    def shutdownServer(self):
+        self.shutdown = True
+        self.asyncloop.stop()
  
     
     async def request_loop(self):
@@ -85,3 +90,7 @@ class brDHT:
             else:
                 await asyncio.sleep(1)
         log.info("Request processor is exiting due to shutdown signal.")
+
+    def __runnerThread__(self):
+        self.asyncloop.run_forever()
+        log.info("DHT Server Async Thread got shutdown signal.")
