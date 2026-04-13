@@ -36,6 +36,9 @@ class brSettings():
                 'debug': True,
                 'anon-logging': False
             }
+            settings['production'] = {
+                'testing': False,
+            }
 
             with open("BR.conf", 'w') as configfile:
                 settings.write(configfile)

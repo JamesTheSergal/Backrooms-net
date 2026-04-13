@@ -2,10 +2,13 @@ import re
 import asyncio
 from queue import Queue
 import time
-from brCore.brNodeNet import brDHTLog as log
 from kademlia.network import Server
 from threading import Thread
 import logging
+from . import loggingfactory
+
+log = loggingfactory.getDefaultLogger()
+
 
 # Get a list of IP addresses and ports from bootstrapdht.txt
 def dht_file_read():
@@ -35,7 +38,7 @@ def dht_file_read():
     
 class brDHT:
     
-    def __init__(self, serverport:int, dhtid:int=None):
+    def __init__(self, enclaveStorage, serverport:int, dhtid:int=None):
         self.serverport = serverport
         self.dhtServer = None
         self.asyncloop = asyncio.new_event_loop()
@@ -50,18 +53,22 @@ class brDHT:
         # Async specific stuff
         self.asyncloop.set_debug(True)
         if dhtid:
-            self.dhtServer = Server(node_id=dhtid)
+            self.dhtServer = Server(node_id=dhtid, storage=enclaveStorage)
         else:
-            self.dhtServer = Server()
+            self.dhtServer = Server(storage=enclaveStorage)
             
         self.asyncloop.run_until_complete(self.dhtServer.listen(self.serverport))
         
         self.asyncloop.create_task(self.request_loop())
         if len(self.bootstraplist) == 0:
-            log.info("No bootstrap nodes in list. Starting up alone...")
+            log.info("No bootstrap nodes in text list. Starting up alone...")
         else:
             log.info("Boot strapping DHT server...")
             self.asyncloop.run_until_complete(self.dhtServer.bootstrap(self.bootstraplist))
+    
+    def setBootstrapList(self, bootstraplist):
+        log.info(f"Boot strapping DHT server with: {bootstraplist}")
+        self.asyncloop.run_until_complete(self.dhtServer.bootstrap(bootstraplist))
     
     async def getRequest(self, key):
         result = await self.dhtServer.get(key)
@@ -73,6 +80,7 @@ class brDHT:
     def shutdownServer(self):
         self.shutdown = True
         self.asyncloop.stop()
+        return self.dhtServer.bootstrappable_neighbors()
  
     
     async def request_loop(self):

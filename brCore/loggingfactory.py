@@ -1,7 +1,7 @@
 import logging
 import time
 
-def setDefault():
+def setDefault(logpath:str=""):
     logging.basicConfig(
             encoding="utf-8",
             format="{asctime}.{msecs} - [{thread} {module}.{funcName}:({lineno})] - [{levelname}] - {message}",
@@ -9,10 +9,13 @@ def setDefault():
             datefmt="%Y-%m-%d %H:%M:%S",
             level=logging.INFO,
             handlers=[
-                logging.FileHandler("node.log", mode='a'),
+                logging.FileHandler(logpath+"node.log", mode='a'),
                 logging.StreamHandler()
             ]
     )
+
+def getDefaultLogger():
+    return logging.getLogger()
 
 def createNewLogger(name, path="./", level=logging.DEBUG):
 

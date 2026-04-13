@@ -9,7 +9,7 @@ import threading
 import time
 import uuid
 import requests
-from brCore import brWebLog
+from . import brWebLog
 from brCore.brEnclave import notrustvars
 #from node import BR_VERSION
 

@@ -2,7 +2,7 @@ import socket
 from .brHandshake import Handshake
 from brCore import BR_VERSION
 from brCore.brSockets.brPacket import brPacket
-from brCore import brNodeHsLog as debuglog
+from . import brNodeHsLog as debuglog
 
 class brDebugHandshake(Handshake):
     

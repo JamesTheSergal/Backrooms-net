@@ -12,7 +12,6 @@ printstartfancy(BR_VERSION)
 # Import logging factory for global log creation
 import logging
 from .loggingfactory import setDefault, createNewLogger
-loggingfactory.setDefault()
 
 # Import settings class
 from .settings import brSettings
@@ -38,56 +37,6 @@ if not brCoreSettings.settingsExisted:
 else:
     pass
 
-# Run several tests on settings
-debug = brCoreSettings.getBoolSetting('logging', 'debug')
-anonlog = brCoreSettings.getStrSetting('logging', 'anon-logging')
-
-if debug:
-    logging.warning("Debug is set to TRUE! (ONLY DO THIS IF YOU KNOW WHAT YOU ARE DOING!!!)")
-    logging.basicConfig(level=logging.DEBUG)
-else:
-    logging.basicConfig(level=logging.INFO)
-
-if debug == True and anonlog == True:
-    logging.critical(
-        "\n---- WARNING ----\n"
-        "Using DEBUG mode and using the anonymous logging mode at the same time can log data that\n"
-        "could be used to identify your machine! Please reconsider! (Thanks for the logs tho <3)\n"
-        "---- WARNING ----\n"
-    )
-    time.sleep(8)
-
-
-# Check for or create Temp dir
-tempdir = Path("temp/")
-if tempdir.is_dir():
-    pass
-else:
-    try:
-        os.mkdir("temp/")
-    except OSError:
-        logging.error("Couldn't create temp directory!", exc_info=True)
-        exit()
-    except Exception as e:
-        logging.error("Unknown error while creating temp directory!", exc_info=True)
-        exit()
-
-# Once our temp is created, set default logger format
-setDefault()
-
-# create our general logs
-brGeneralLog = createNewLogger("brMainLog", "temp/", level=logLevel)
-brWebLog = createNewLogger("brWebCore", "temp/", level=logLevel)
-brEnclaveLog = createNewLogger("brWebCore", "temp/", level=logLevel)
-brSecurityLog = createNewLogger("brSecurity", "temp/", level=logLevel)
-
-# Low level socket logs
-brAgentLog = createNewLogger("brNodeAgent", "temp/", level=logLevel)
-brServeLog = createNewLogger("brNodeServe", "temp/", level=logLevel)
-brNodeHsLog = createNewLogger("brNodeHandshakes", "temp/", level=logLevel)
-brDHTLog = createNewLogger('kademlia', "temp/", level=logLevel)
-
-
 # Sockets and network
 import brCore.brSockets
 from brCore.brSockets.brNodeAgent import brSocketAgent
@@ -99,18 +48,8 @@ from brCore.brNodeNet.brDHT import brDHT
 import brCore.brEnclave
 from brCore.brEnclave import notrustvars
 from brCore.brEnclave import Enclave
+from brCore.brEnclave import EnclaveStorage
 
 # Web server
 import brCore.brWebServer
 from brCore.brWebServer import brWebCore, brWebDefaults, brWebElements, webResponder
-
-# Establish the main Enclave for the node
-mainEnclave = Enclave(brCoreSettings.getStrSetting('enclave','enclave-name'))
-
-# Establish the main DHT for the node
-if mainEnclave.isEncKey("DHTid"):
-    mainDHT = brDHT(brCoreSettings.getIntSetting('network', 'brDHT-port'), mainEnclave.returnData("DHTid"))
-else:
-    mainDHT = brDHT(brCoreSettings.getIntSetting('network', 'brDHT-port'))
-    mainEnclave.insertData("DHTid", mainDHT.dhtServer.node.id)
-    brDHTLog.info("Saved newly generated DHT ID to the Enclave.")

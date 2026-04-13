@@ -78,7 +78,7 @@ class Enclave:
         def __str__(self):
             return f"{self.message} {self.key}"
     
-    def __init__(self, enclaveName, newIdentity:bool = False) -> None:
+    def __init__(self, enclaveName, pathtouse:str=None, newIdentity:bool = False) -> None:
 
         self.enclaveName = enclaveName
         
@@ -111,10 +111,15 @@ class Enclave:
         self.__vector = None
         
         # Directory setup
-        self.dirpath = 'temp/'  # NOTE: Made this configurable? E.g., via env var for production (avoid 'temp' in shared envs).
-        tempdir = Path(self.dirpath)
-        self.target_enclave = Path(f'{self.dirpath}{enclaveName}.encl')
-        
+        if pathtouse is None:
+            self.dirpath = 'temp/'  # NOTE: Made this configurable? E.g., via env var for production (avoid 'temp' in shared envs).
+            tempdir = Path(self.dirpath)
+            self.target_enclave = Path(f'{self.dirpath}{enclaveName}.encl')
+        else:
+            self.dirpath = pathtouse
+            tempdir = Path(self.dirpath)
+            self.target_enclave = Path(f'{self.dirpath}{enclaveName}.encl')
+            
         if not tempdir.is_dir():
             try:
                 os.mkdir(self.dirpath)

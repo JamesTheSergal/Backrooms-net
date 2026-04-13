@@ -1,6 +1,8 @@
 from .. import BR_VERSION
-from .. import brNodeHsLog
-from .. import brAgentLog
+from .. import loggingfactory
+
+brNodeHsLog = loggingfactory.getDefaultLogger()
+brAgentLog = loggingfactory.getDefaultLogger()
 
 # Import protocols
 import brCore.brSockets.brProtocols
