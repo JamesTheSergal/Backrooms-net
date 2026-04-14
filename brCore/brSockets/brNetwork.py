@@ -160,6 +160,7 @@ class brNetwork:
     
     def __handshakeSafeLoop__(self, nodeRoute:brRoute):
         
+        
         netAddress = nodeRoute.externalNode.nodeIP
         netPort = nodeRoute.externalNode.nodePort
         connection = nodeRoute.assignedConn
@@ -170,7 +171,7 @@ class brNetwork:
             runnable = sequence.get()
             message = runnable()
             try:
-                connection.send(message)
+                connection.sendall(message)
                 logger.info(f"Sent introduction packet to {netAddress}")
             except:
                 logger.exception("We attempted to initiate the connection and failed to get a proper response!", exc_info=True)
@@ -185,6 +186,7 @@ class brNetwork:
                 #ourHandledBytes += len(rawpacket)
                 message = brPacket(rawpacket)
                 nodeRoute.mostRecentPacket = message
+
             except:
                 logger.exception("Critical error when receiving data!", exc_info=True)
                 break
@@ -206,16 +208,24 @@ class brNetwork:
                         logger.info("Waiting for controller request to complete...")
                         result.waitForRequestComplete()
                         logger.info("Request completed")
-                        connection.send(result.response)
+                        connection.sendall(result.response)
                 else:
                     logger.error(f'Error with handshake validation: {result.additionalInfo} {result.rawData}')
                     connection.close()
                     break
+            elif type(result) is brControllerRequest:
+                result:brControllerRequest
+                result.routeInfo = nodeRoute
+                self.toRouter.put(result)
+                logger.info("Waiting for controller request to complete...")
+                result.waitForRequestComplete()
+                logger.info("Request completed")
+                connection.sendall(result.response)
             elif type(result) is bytes:
                 pass
-
-            
-            
+        
+        logger.info("Completed basic handshake!")
+       
     
     def __connectionThread__(self, nodeRoute:brRoute):
 
@@ -303,7 +313,7 @@ class brNetwork:
             except Empty:
                 pass
             if type(job) is bytes:
-                connection.send(job)
+                connection.sendall(job)
             else:
                 logger.error("Unknown job type received from Router.")
             

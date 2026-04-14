@@ -55,10 +55,11 @@ class brHandshake:
 
     class handshakeStep:
         
+        ### Apart of the Basic Unencrypted handshake
+        
         def initiateHello(inputdata:brPacket=None):
             return brPacket().createSimpleHello()
-
-
+        
         # If initiating the connection, Legacyhello creates a packet.
         # If we are on the receiving side, function will return a handshake result object
         def validateHello(inputdata:brPacket=None):
@@ -109,7 +110,12 @@ class brHandshake:
             else:
                 if inputdata.messageType is brPacket.brMessageType.READY:
                     return brControllerRequest(brControllerRequest.requestType.COMPLETE_BASIC_HANDSHAKE, data=inputdata)
-            
+        
+        ### Encrypted Handshake
+        
+        def announceEncryptionLevelChange(inputdata=None):
+            pass
+        
                 
 
     def brReceiveBasicHandshake():
@@ -132,4 +138,6 @@ class brHandshake:
  
         return sequence
     
+    def brInitiateEncryption():
+        sequence = Queue(5)
     

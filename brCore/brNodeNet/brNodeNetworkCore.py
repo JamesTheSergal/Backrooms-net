@@ -112,6 +112,7 @@ class brNodeServer:
         self.running = False
         self.shutdown = False
         # ------------
+        
 
         # Socket Control Module
         self.socketControl = brNetwork()
@@ -119,7 +120,7 @@ class brNodeServer:
     def startServer(self):
         logger.info("Started node server.")
         if not self.running:
-            self.socketControl.startListener(bindAddress="127.0.0.1", nodePort=13337)
+            self.socketControl.startListener(bindAddress="127.0.0.1", nodePort=self.nodePort)
             self.socketControl.startInitiator(bindAddress="127.0.0.1")
             self.controllerThread = threading.Thread(name="brNetworkController", target=self.__networkController__, args=[])
             self.routerThread = threading.Thread(name="brNodeNetworkRouter", target=self.__router__, args=[])
@@ -200,10 +201,11 @@ class brNodeServer:
                         configMessage.insertObject(config)
                         job.completeRequest(configMessage.buildPacket())
                     elif job.requesttype is brControllerRequest.requestType.PARSE_RECEIVED_CONFIG:
-                        route = job.routeInfo
-                        externalConfig = job.data
+                        route:brRoute = job.routeInfo
+                        packet:brPacket = job.data
+                        externalConfig:dict = packet.rebuildObject()
                         
-                        route.externalNode.setNodeUUID(externalConfig['uuid'])
+                        route.externalNode.localNodeID = externalConfig['uuid']
                         route.externalNode.dhtport = externalConfig['dhtport']
                         route.externalNode.webPort = externalConfig['webport']
                         job.completeRequest(brPacket().createSimpleReady())
@@ -320,9 +322,10 @@ class brNodeServer:
         #
         if self.secureEnclave.isEncKey("knownNodes"):
             routes = self.generateRoutesFromEnclaveSave()
-            for pendingRoute in routes:
-                self.socketControl.connectRequest.put(pendingRoute)
-            logger.info(f'Finished adding {len(routes)} routes from the Enclave to reconnect to...')
+            if routes is not None:
+                for pendingRoute in routes:
+                    self.socketControl.connectRequest.put(pendingRoute)
+                logger.info(f'Finished adding {len(routes)} routes from the Enclave to reconnect to...')
             
         else:
             if Path('seedservers.txt').is_file():
@@ -334,7 +337,9 @@ class brNodeServer:
         
         logger.info("Network controller ready.")
 
-        # Local variables for controller
+        # Main Controller Loop
+        #
+        #
 
         while not self.shutdown:
 

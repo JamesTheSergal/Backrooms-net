@@ -19,9 +19,9 @@ def publishWebServerStats(mainEnclave:Enclave, webServer: brWebCore.brWebServer)
     mainEnclave.updateEntry("brWebCore_connections", len(webServer.connections))
 
 def publishNodeServerStats(mainEnclave:Enclave, nodeServer: brNodeNetworkCore.brNodeServer):
-    mainEnclave.updateEntry("brNodeNetwork_incomingBytes", nodeServer.handledIncomingBytes)
-    mainEnclave.updateEntry("brNodeNetwork_outgoingBytes", nodeServer.handledOutgoingBytes)
-    mainEnclave.updateEntry("brNodeNetwork_requests", nodeServer.respondedToRequests)
+    mainEnclave.updateEntry("brNodeNetwork_incomingBytes", nodeServer.socketControl.handledIncomingBytes)
+    mainEnclave.updateEntry("brNodeNetwork_outgoingBytes", nodeServer.socketControl.handledOutgoingBytes)
+    mainEnclave.updateEntry("brNodeNetwork_requests", nodeServer.socketControl.respondedToRequests)
 
 class brNode:
     
@@ -101,6 +101,8 @@ class brNode:
         self.webServer.buildRoute(brWebCore.brWebServer.route.GET_ROUTE, "/requestuuid", self.brWebUI.clientGetUUID4)
         self.webServer.buildRoute(brWebCore.brWebServer.route.GET_ROUTE, "/announce", self.brWebUI.brAnnounce)
         self.webServer.buildRoute(brWebCore.brWebServer.route.POST_ROUTE, "/announce/publickey", self.brWebUI.brAnnouncePost)
+        self.webServer.buildRoute(brWebCore.brWebServer.route.GET_ROUTE, "/insecureannounce", self.brWebUI.insecureAnnounce)
+        self.webServer.buildRoute(brWebCore.brWebServer.route.POST_ROUTE, "/insecureannounce", self.brWebUI.insecureAnnouncePost)
         self.webServer.startServer()
         logging.info(f"Backrooms configured to run a webserver on: {bindAddress}:{port}")
         time.sleep(5)
@@ -137,15 +139,14 @@ class brNode:
         try:
             while True:
                 time.sleep(5)
-                # Publish web server stats to enclave
-                #publishWebServerStats(self.mainEnclave, self.webServer)
-                #publishNodeServerStats(self.mainEnclave, self.nodeServer)
+                publishWebServerStats(self.mainEnclave, self.webServer)
+                publishNodeServerStats(self.mainEnclave, self.nodeServer)
         except KeyboardInterrupt:
             logging.info("Got keyboard inturrupt.")
             futureBootStrap = self.mainDHT.shutdownServer()
             self.mainEnclave.updateEntry("dhtbootstrap", futureBootStrap, create=True)
-            #self.nodeServer.shutdownServer()
-            #self.webServer.shutdownServer()
+            self.nodeServer.shutdownServer()
+            self.webServer.shutdownServer()
             logging.info("Saving persistence data...")
             self.mainEnclave.saveEnclaveFile(overwrite=True)
             logging.info("Main thread exiting...")
