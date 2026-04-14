@@ -99,14 +99,28 @@ def getNewSalt():
     return os.urandom(16)  # 128-bit salt
 
 def __getMachineIdentity__():
-    """Generates a unique identifier for the current machine using the (MAC-SystemType-SystemDomainName)
+    """Generates a unique identifier for the current machine using a combination of hardware and system factors.
     This is used to verify the system's identity and derive a decryption key.
+    
+    Enhancements: Includes additional factors like architecture, processor, OS release, and version for better uniqueness and robustness against spoofing.
     
     Returns:
         tuple: (identifier, idHash) String identifying the current machine and a SHA hash of that identifier.
     """
-    identifier = f'{uuid.getnode()}-{platform.system()}-{platform.node()}'  # NOTE: TODO: Enhance with more factors (e.g., disk serial, CPU ID) for robustness against changes.
-    idHash = hashlib.sha256(identifier.encode("utf-8"))
+    # Collect multiple stable identifiers to increase uniqueness and resistance to changes
+    identifiers = [
+        str(uuid.getnode()),          # MAC address (network hardware)
+        platform.system(),            # OS type (e.g., 'Windows', 'Linux')
+        platform.node(),              # Hostname
+        platform.machine(),           # Machine architecture (e.g., 'x86_64')
+        platform.processor(),         # Processor name (e.g., 'Intel64 Family 6 Model 158 Stepping 13')
+        platform.release(),           # OS release (e.g., kernel version)
+        platform.version(),           # OS version (detailed release info)
+    ]
+    
+    # Join them into a single string for hashing
+    identifier = '-'.join(identifiers)
+    idHash = hashlib.sha256(identifier.encode("utf-8")).hexdigest()
     return (identifier, idHash)
 
 def derive_key(salt):

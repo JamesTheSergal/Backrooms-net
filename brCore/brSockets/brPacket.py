@@ -152,6 +152,10 @@ class brPacket:
             self.data = objdata
         else:
             raise self.brPacketOversize()
+        
+    def rebuildObject(self):
+        objdata = pickle.loads(self.data)
+        return objdata
 
     def buildPacket(self, msgType:brMessageType=None) -> bytes:
 
@@ -181,3 +185,6 @@ class brPacket:
     
     def createSimpleReady(self):
         return self.buildPacket(brPacket.brMessageType.READY)
+    
+    def createCallbackPing(self):
+        return self.buildPacket(brPacket.brMessageType.CALLBACK_PING)

@@ -2,6 +2,7 @@ from enum import IntEnum
 import logging
 from pathlib import Path
 import pprint
+from queue import Empty
 import random
 import socket
 import os
@@ -9,9 +10,13 @@ import threading
 import time
 import uuid
 import requests
-from . import brWebLog
-from brCore.brEnclave import notrustvars
-#from node import BR_VERSION
+from . import brNodeCoreLog
+from brCore.brSockets.brPacket import brPacket
+from brCore.brEnclave.Enclave import Enclave
+from ..brSockets.brNodeRecord import brNodeRecord
+from ..brSockets.brNetwork import brNetwork
+from .brRoute import brRoute
+from .brDHT import brDHT
 
 BR_VERSION = "0.0.1-alpha"
 
@@ -57,268 +62,7 @@ BR_VERSION = "0.0.1-alpha"
 
 
 
-logger = brWebLog
-
-class brPacket:
-
-    class backroomsProtocolException(Exception):
-        pass
-
-    class brPacketOversize(backroomsProtocolException):
-        """Exception is raised when the packet is larger than the max allowed by the protocol."""
-
-        def __init__(self, data) -> None:
-            self.message = "Backrooms Protocol violation. Data is oversized. (Overflow? Security Violation?) (Data Involved) ->"
-            self.data = data
-            super().__init__(self.message, self.data)
-
-        def __str__(self):
-            return f"{self.message}\n{pprint.pprint(self.data)}"
-        
-    class brInvalidMessageType(backroomsProtocolException):
-        """Exception raised when an invalid message type is invoked."""
-
-        def __init__(self, data) -> None:
-            self.message = "Backrooms Protocol violation. Invalid message type! (Data Involved) ->"
-            self.data = data
-            super().__init__(self.message, self.data)
-
-        def __str__(self):
-            return f"{self.message}\n{pprint.pprint(self.data)}"
-        
-    class brInvalidVersion(backroomsProtocolException):
-        """Exception raised when an invalid version format is used."""
-
-        def __init__(self, data) -> None:
-            self.message = "Backrooms Protocol violation. Invalid version format! Ensure size is not exceeded! (Data Involved) ->"
-            self.data = data
-            super().__init__(self.message, self.data)
-
-        def __str__(self):
-            return f"{self.message}\n{pprint.pprint(self.data)}"
-        
-    class brPreFlightCheckFailure(backroomsProtocolException):
-        """Exception raised when a preflight check for the packet fails."""
-
-        def __init__(self, data) -> None:
-            self.message = "Backrooms Protocol violation. Pre-Flight check failed! (Data Involved) ->"
-            self.data = data
-            super().__init__(self.message, self.data)
-
-        def __str__(self):
-            return f"{self.message}\n{pprint.pprint(self.data)}"
-
-    class brMessageType(IntEnum):
-        INTRODUCE = 0
-        CHALLENGE = 1
-        CHALLENGE_RES = 2
-        ENCR_COMMS = 3      # Sent when nodes finally upgrade to encrypted communications
-        ASK_FOR_FRIENDS = 4
-        FRIEND_ANNOUNCE = 5
-        PING = 6
-        CALLBACK_PING = 7   # Absolute Solver - Used to provide a window for response
-        NEW_MESSAGE = 8     # Packet will contain the number of packets after this one to be received
-        READY_MESSAGE = 9   # Response that we are ready to receive sequence
-        MESSAGE = 10        # Data to receive
-
-    def __init__(self, receivedPacket:bytes=None) -> None:
-
-        if receivedPacket is not None:
-            # Start processing packet.
-            messageType = receivedPacket[0]
-            if messageType in brPacket.brMessageType:
-                self.messageType = messageType
-            else:
-                raise brPacket.brInvalidMessageType(messageType) 
-            version = receivedPacket[1:15]
-            self.version = version.lstrip(b'\0').decode('utf-8')
-            self.data = receivedPacket[15:]
-        else:
-            self.messageType:int = None
-            self.version:str = BR_VERSION
-            self.altIP: str = None
-            self.altPub: str = None
-            self.toClient: str = None
-            self.fromClient: str = None
-            self.data: bytes = b''
-            
-    def setMessageType(self, msgdesc:int):
-        if msgdesc in brPacket.brMessageType:
-            self.messageType = msgdesc
-            return self
-        else:
-            pass # Raise exception 
-
-    def setMessageVersion(self, version:str):
-        self.version = version.encode("utf-8").ljust(14, b'\0')
-
-    def buildPacket(self):
-        messageType = self.messageType.to_bytes(1, byteorder='little')
-        version = self.version
-        # Pre-flight check
-
-        if len(messageType) != 1:
-            raise brPacket.brInvalidMessageType(f'Message type data: {messageType}')
-
-
-        packet = messageType + version + self.data
-        return packet
-    
-class brNodeRecord:
-
-    def __init__(self):
-        # Connection
-        self.nodeIP:str = None
-        self.nodePort:int = 443
-        self.webPort:int = 80
-        self.lastLatency = 0
-        self.connected = False
-        self.finishedHandshake = False
-
-        # Identity
-        self.identity: notrustvars.enclave.security.identity = None
-        self.localNodeID = uuid.uuid4()
-        self.friendlyName = "Unknown"
-
-        # For controller
-        self.firstSeen = time.time()
-        self.lastSeen = 0
-        self.recordThreadLock = threading.Lock()
-        self.participatingInRoutes = []
-
-        logger.debug(f'New node record ID: {self.localNodeID}')
-
-    def queryPubKey(self):
-        if self.nodeIP:
-            requestURL = f'http://{self.nodeIP}:{str(self.webPort)}/pubkey'
-            logger.debug(f"Requesting public key from {requestURL}")
-            try:
-                response = requests.get(url=requestURL)
-            except ConnectionRefusedError:
-                logger.error("Connection refused when connecting to get public key.")
-                return False
-            except:
-                logger.exception("Python Requests exception when requesting public key...", exc_info=False)
-                return False
-            if response.status_code != 200:
-                return False
-            nodeident = notrustvars.enclave.security.identity.newIdentFromPubImport(response.text)
-            self.identity = nodeident
-            logger.debug("Public key has been imported successfully.")
-            return True
-        else:
-            logger.error("IP of node not set. Cannot get pubkey. (Check the code)")
-            return False
-        
-    def setNodeAddress(self, addressTupl:tuple):
-        self.nodeIP = addressTupl[0]
-        self.nodePort = addressTupl[1]
-
-    def setNodeDisconnectedState(self):
-        with self.recordThreadLock:
-            self.lastLatency = 0
-            self.connected = False
-            self.participatingInRoutes.clear()
-            # Pickle cannot store thread locks, so we must make it none!
-            self.recordThreadLock = None
-        return self
-
-class brClient:
-
-    def __init__(self, clientID:str):
-        self.clientID = clientID
-
-class brRoute:
-
-    class brRouteType(IntEnum):
-        CONTROL = 0
-        TEST = 1
-        UNENCRYPTED = 2
-        ENCRYPTED = 3
-        ONION = 4
-        HIGHWAY = 5
-
-    def __init__(self, routeType:brRouteType, assignedConnection:socket.socket, thirdParty:brNodeRecord):
-        self.routeType = routeType 
-        self.routeSecret = random.randrange(0, 1000000)
-        self.routeID = uuid.uuid4()
-        self.assignedConn:socket.socket = assignedConnection # Our thread or some such
-        self.connThread: threading.Thread = None
-        self.thirdParty:brNodeRecord = thirdParty # Would be the node Record 
-        self.routeThreadLock = threading.Lock()
-        self.timeToLive = 0
-        self.controllerLastSeen = 0
-        self.encryptionUpgraded = False
-
-        # If we are a hop, we won't know these
-        self.connectingFrom = None # Client on our end we are connecting
-        self.connectingTo = None # Would be the client specifically we created this route for
-
-        # Connection updates
-        self.newNews = False
-        self.news = []
-        self.newIncoming = False
-        self.inbox = []
-        self.newOutgoing = False
-        self.outbox = []
-        self.routeState = "Unknown"
-
-        # Make reference to this route in the third party record
-        with self.thirdParty.recordThreadLock:
-            self.thirdParty.participatingInRoutes.append(self)
-
-
-    def isHandShakeComplete(self):
-        return self.thirdParty.finishedHandshake
-    
-    def setHandShakeComplete(self):
-        logger.debug(f'Handshake with {self.thirdParty.nodeIP} complete.')
-        with self.routeThreadLock:
-            self.thirdParty.finishedHandshake = True
-
-    def setConnectedState(self, state:bool):
-        with self.routeThreadLock:
-            self.thirdParty.connected = state
-
-    def thirdPartyPubKeyCheck(self):
-        # Just make sure we have the other parties Public key.
-        if self.thirdParty.identity == None:
-            if self.thirdParty.queryPubKey():
-                return True
-            else:
-                return False
-        else:
-            return True
-                
-    def setRouteStateIdle(self):
-        with self.routeThreadLock:
-            self.routeState = "Idle"
-
-    def setRouteStateBusy(self):
-        with self.routeThreadLock:
-            self.routeState = "Busy"
-
-    def upgradeRouteType(self, brtype:brRouteType):
-        with self.routeThreadLock:
-            self.routeType = brtype
-            self.controllerLastSeen = 0
-    
-    def controllerLastSeenNow(self):
-        with self.routeThreadLock:
-            self.controllerLastSeen = time.time()
-
-    def removeRouteReference(self):
-        with self.thirdParty.recordThreadLock:
-            self.thirdParty.participatingInRoutes.remove(self)
-
-class brNodeControllerRequestAgent:
-
-    class brControllerRequestType(IntEnum):
-        CREATE_ROUTE = 0
-        ESTABLISH_CLIENT = 1
-
-    def __init__(self):
-        pass
+logger = brNodeCoreLog
 
 class brNodeServer:
 
@@ -326,7 +70,7 @@ class brNodeServer:
         """Exception base class for the brWebServer."""
         pass
 
-    def __init__(self, secureEnclave:notrustvars.enclave, bindAddress:str="127.0.0.1", nodePort:int=443, insecurePort:int=80, debug=False) -> None:
+    def __init__(self, secureEnclave:Enclave, dhtServer:brDHT, bindAddress:str="127.0.0.1", nodePort:int=13337, webPort:int=11000, debug=False) -> None:
 
         # If debug is set, we will log at the lowest level + debug timings
         self.debug = debug
@@ -335,24 +79,23 @@ class brNodeServer:
         # Network setup
         self.bindAddress = bindAddress
         self.nodePort:int = nodePort
-        self.insecurePort:int = insecurePort
+        self.webPort:int = webPort
         # ------------
 
         # Secure Enclave for peer stats
         self.secureEnclave = secureEnclave
         # ------------
+        
+        # DHT
+        self.dht = dhtServer
+        #
 
         # Connection Pool
-        self.connPoolLock = threading.Lock()
-        self.pendingConnect:list[brRoute] = [] # pending outgoing connections - Not inbound
-        self.failedToConnect:list[brRoute] = []
-        self.inTesting:list[brRoute] = []
-        self.controlRoutes:list[brRoute] = []
-        self.activeRoutes:list[brRoute] = []
-        self.shutdownRoutes:list[brRoute] = []
+        # Will be replaced
         # ------------
 
         # Network controller specific
+        self.uuid = None
         self.controllerLock = threading.Lock()
         self.ourClients = {}
         self.knownClients = {}
@@ -366,10 +109,6 @@ class brNodeServer:
         # Threads
         self.thrLock = threading.Lock()
         self.controllerThread:threading.Thread = None
-        self.inboundThread:threading.Thread = None
-        self.outboundThread:threading.Thread = None
-        self.inboundNodeThreads:list[threading.Thread] = []
-        self.outboundNodeThreads:list[threading.Thread] = []
         # ------------
 
         # Server state flags
@@ -377,150 +116,28 @@ class brNodeServer:
         self.shutdown = False
         # ------------
 
-        # Stats
-        self.statsLock = threading.Lock()
-        self.handledIncomingBytes = 0
-        self.handledOutgoingBytes = 0
-        self.respondedToRequests = 0
-        # ------------
+        # Socket Control Module
+        self.socketControl = brNetwork()
 
     def startServer(self):
         logger.info("Started node server.")
         if not self.running:
+            self.socketControl.startListener(bindAddress="127.0.0.1", nodePort=13337)
+            self.socketControl.startInitiator(bindAddress="127.0.0.1")
             self.controllerThread = threading.Thread(name="brNetworkController", target=self.__networkController__, args=[])
-            self.inboundThread = threading.Thread(name="brNodeNetworkInbound", target=self.__inboundLoop__, args=[])
-            self.outboundThread = threading.Thread(name="brNodeNetworkOutbound", target=self.__outboundLoop__, args=[])
+            self.routerThread = threading.Thread(name="brNodeNetworkRouter", target=self.__router__, args=[])
+            self.routerThread.start()
             self.controllerThread.start()
-            self.inboundThread.start()
-            self.outboundThread.start()
+            
+            
+            
 
     def shutdownServer(self):
         self.shutdown = True
+        self.socketControl.shutdown = True
         logger.info("Sent shutdown signal - Node Main Thread is now waiting...")
-        self.inboundThread.join()
-        self.outboundThread.join()
-        self.controllerThread.join()
+        # Fix this later
 
-    def __inboundLoop__(self):
-        
-        try:
-            soc = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            soc.bind((self.bindAddress, self.nodePort))
-            soc.listen(4)
-            soc.settimeout(0.5)
-            self.running = True
-        except Exception as e:
-            logger.exception("Error occured when creating socket!", exc_info=True)
-            self.running = False
-            return
-        
-        while self.shutdown is False:
-
-            # Handle incoming first
-            try:
-                connection, address = soc.accept()
-
-                # Check to see if we have seen this connection before
-                nodeIP = address[0]
-
-                if nodeIP in self.knownNodes.keys():
-                    pendingNode = self.knownNodes[nodeIP]
-                else:
-                    pendingNode = brNodeRecord()
-                    pendingNode.setNodeAddress(address)
-                    with self.controllerLock:
-                        self.knownNodes[nodeIP] = pendingNode
-                    
-
-                pendingRoute = brRoute(brRoute.brRouteType.TEST, connection, pendingNode)
-
-                spawnThread = threading.Thread(name=f'brNodeCon-inbound-({address})',target=self.__connectionThread__, args=[pendingRoute, "inbound"])
-                self.inboundNodeThreads.append(spawnThread)
-                self.inTesting.append(pendingRoute)
-                spawnThread.start()
-            except socket.timeout:
-                # This is normal. It gives us time to loop and check threads.
-
-                deadThreads = []
-                for thr in self.inboundNodeThreads:
-                    if not thr.is_alive():
-                        deadThreads.append(thr)
-
-                for thr in deadThreads:
-                    self.inboundNodeThreads.remove(thr)
-            
-        
-        # Broke out of loop. We must be shutting down.
-        logger.info("Inbound Node loop received shutdown, refusing new connections.")
-        logger.info(f'Waiting for {len(self.inboundNodeThreads)} threads to shutdown...')
-
-        while len(self.inboundNodeThreads) > 0:
-            logger.info(f'Waiting for {len(self.inboundNodeThreads)} threads to shutdown...')
-            for thr in self.inboundNodeThreads:
-                thr.join(timeout=5.0)
-                if not thr.is_alive():
-                    logger.info(f'Thread {thr.native_id} shutdown...')
-                    self.inboundNodeThreads.remove(thr)
-                
-        logger.info("All threads closed. Exiting main loop.")
-
-    def __outboundLoop__(self):
-
-        while self.shutdown is False:
-
-            if len(self.pendingConnect) > 0:
-
-                with self.connPoolLock:
-                    outboundConnect = self.pendingConnect.pop()
-                
-                outboundIP = outboundConnect.thirdParty.nodeIP
-                outboundPort = outboundConnect.thirdParty.nodePort
-
-                try:
-                    obsoc = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                    logger.debug("Attempting to connect to node...")
-                    obsoc.connect((outboundIP, outboundPort))
-                    outboundConnect.assignedConn = obsoc
-                    spawnThread = threading.Thread(name=f'brNodeCon-outbound-({outboundIP})',target=self.__connectionThread__, args=[outboundConnect, "outbound"])
-                    self.outboundNodeThreads.append(spawnThread)
-                    spawnThread.start()
-                    logger.debug("Connected.")
-                except ConnectionRefusedError:
-                    with self.thrLock:
-                        self.failedToConnect.append(outboundConnect)
-                    logger.exception("Cannot connect to node! Connection refused!", exc_info=False)
-                except:
-                    with self.thrLock:
-                        self.failedToConnect.append(outboundConnect)
-                    logger.exception("Connection error!", exc_info=True)
-            else:
-
-                # Dead thread sweep
-                deadThreads = []
-                for thr in self.outboundNodeThreads:
-                    if not thr.is_alive():
-                        deadThreads.append(thr)
-
-                for thr in deadThreads:
-                    self.outboundNodeThreads.remove(thr)
-
-
-                time.sleep(0.05)
-        
-        # Broke out of loop. We must be shutting down.
-        logger.info("Outbound Node loop received shutdown, refusing new connections.")
-        logger.info(f'Waiting for {len(self.outboundNodeThreads)} threads to shutdown...')
-
-        while len(self.outboundNodeThreads) > 0:
-            logger.info(f'Waiting for {len(self.outboundNodeThreads)} threads to shutdown...')
-            for thr in self.outboundNodeThreads:
-                thr.join(timeout=5.0)
-                if not thr.is_alive():
-                    logger.info(f'Thread {thr.native_id} shutdown...')
-                    self.outboundNodeThreads.remove(thr)
-                
-        logger.info("All threads closed. Exiting main loop.")
-            
     def __debugToFile__(data: bytes, id, count):
         tempdir = Path(f'temp/{id}')
         if not tempdir.is_dir():
@@ -529,7 +146,37 @@ class brNodeServer:
             df.write(data)
         logger.debug(f'Wrote packet to: temp/{id}/{str(count)}.packet')
 
-    def __router__(self, packet: brPacket, nodeRoute:brRoute):
+    def __router__(self):
+        while self.shutdown is False:
+
+            try:
+                job:brRoute = self.socketControl.toRouter.get(block=True, timeout=0.15)
+            except Empty:
+                # This is to be expected a lot
+                job = None
+                time.sleep(0.25)
+
+            if job is not None:
+                if job.mostRecentPacket is not None:
+                    if job.mostRecentPacket.messageType is brPacket.brMessageType.INTRODUCE and job.externalNode.finishedUnencryptedHandshake is False:
+                        job.outbox.put(brPacket().createSimpleReady())
+                        job.routerPerformedAction()
+                    if job.mostRecentPacket.messageType is brPacket.brMessageType.READY and job.externalNode.finishedUnencryptedHandshake is False:
+                        logger.info("Got ready from unknown node, sending config data")
+                        config = {'uuid': self.uuid, 'dhtport': self.dht.dhtServer.node.port, 'webport': self.webPort}
+                        configMessage = brPacket().setMessageType(brPacket.brMessageType.NODE_INFO)
+                        configMessage.insertObject(config)
+                        job.outbox.put(configMessage.buildPacket())
+                        job.routerPerformedAction()
+                    if job.mostRecentPacket.messageType is brPacket.brMessageType.NODE_INFO and job.externalNode.finishedUnencryptedHandshake is False:
+                        logger.info("Received node info packet from external node")
+                        configobj = job.mostRecentPacket.rebuildObject()
+                        job.externalNode.setNodeUUID(configobj['uuid'])
+                        job.externalNode.dhtport = configobj['dhtport']
+                        job.externalNode.webPort = configobj['webport']
+                    
+    
+    def __routerOld__(self):
         if packet.messageType == brPacket.brMessageType.INTRODUCE:
 
             if nodeRoute.thirdParty.identity == None:
@@ -595,145 +242,22 @@ class brNodeServer:
             return True
         elif packet.messageType == brPacket.brMessageType.CALLBACK_PING:
             return True
-
-    def __connectionThread__(self, nodeRoute:brRoute, mode:str):
-
-        netAddress = nodeRoute.thirdParty.nodeIP
-        netPort = nodeRoute.thirdParty.nodePort
-        connection = nodeRoute.assignedConn
-
-        # Statistics gathering
-        ourHandledBytes = 0
-        ourOutgoingBytes = 0
-        ourHandledRequests = 0
-        # ----
-
-        # Make sure we have a Public Key from who we are trying to talk to
-        if not nodeRoute.thirdPartyPubKeyCheck() and mode != "inbound":
-            logger.error("Failed to get a public key. Validation failed, connection canceled.")
-            connection.close()
-            with self.thrLock:
-                self.failedToConnect.append(nodeRoute)
-            return
-
-
-        # Check if we are the initiator and send introduction packet
-        if mode == "outbound":
-            message = brPacket()
-            message.setMessageType(brPacket.brMessageType.INTRODUCE)
-            message.setMessageVersion(BR_VERSION)
-            ourConfig = f'{self.insecurePort}-{self.nodePort}'.encode('utf-8')
-            message.data = ourConfig
-            packet = message.buildPacket()
-            try:
-                connection.send(packet)
-                logger.debug(f"Sent introduction packet to {netAddress}")
-            except:
-                logger.exception("We attempted to initiate the connection and failed to get a proper response!", exc_info=True)
-            
-            
-        nodeRoute.setConnectedState(True)
-        
-        while not self.shutdown:
-
-            # Attempt to receive data and handle issues
-            try:
-                rawpacket = connection.recv(1024)  # TODO: Set time-out to kill threads we aren't using
-                ourHandledBytes += len(rawpacket)
-            except:
-                logger.exception("Critical error when receiving data!", exc_info=True)
-                break
-
-
-            try:
-                if rawpacket:
-                    if nodeRoute.encryptionUpgraded:
-                        rawpacket = self.secureEnclave.assignedIdentity.decryptChunk(rawpacket)
-                        #TODO: Out of sync encryption when reconnecting to node.
-                        #Must find a better way to coordinate 
-                    message = brPacket(rawpacket)
-                else:
-                    logger.info("Got empty packet. This thread will close.")
-                    connection.close()
-                    break
-            except Exception as e:
-                logger.exception("Critical error when processing client packet!", exc_info=True)
-                break
-
-                
-            # Hand off to router to get the full reply
-            try:
-                reply = self.__router__(message, nodeRoute)
-                ourHandledRequests+= 1
-            except Exception as e:
-                logger.exception("Critical error when processing request!", exc_info=True) # TODO: handle brInvalidMessageType
-                break
-            
-            if reply == False:
-                logger.error("Got a false return from the router. Something went wrong. Exiting.")
-                connection.close()
-                break
-            elif reply == True:
-                nodeRoute.setRouteStateIdle()
-                # We have time to look for messages and news
-                
-                message = brPacket()
-                message.setMessageType(brPacket.brMessageType.CALLBACK_PING)
-                message.setMessageVersion(BR_VERSION)
-                packet = message.buildPacket()
-                reply = nodeRoute.thirdParty.identity.chunkEncrypt(packet)[0]
-                time.sleep(0.5)
-            else:
-                nodeRoute.setRouteStateBusy()
-                if nodeRoute.encryptionUpgraded:
-                    reply = nodeRoute.thirdParty.identity.chunkEncrypt(reply)[0]
-                
-                # Last step of the handshake process. Makes sure that the packet goes out without being encrypted
-                if nodeRoute.thirdParty.finishedHandshake == True and nodeRoute.encryptionUpgraded == False:
-                    with nodeRoute.routeThreadLock:
-                        nodeRoute.encryptionUpgraded = True
-
-            ourOutgoingBytes += len(reply)
-            connection.sendall(reply)
-                
-            # If our route was Idle, send our stats really quick
-            if nodeRoute.routeState == "Idle":
-                with self.statsLock:
-                    self.handledIncomingBytes += ourHandledBytes
-                    self.handledOutgoingBytes += ourOutgoingBytes
-                    self.respondedToRequests += ourHandledRequests
-                    ourHandledBytes = 0
-                    ourOutgoingBytes = 0
-                    ourHandledRequests = 0
-            
-
-        
-        # We broke out, find out why!
-        if self.shutdown:
-            logger.info("Thread got shutdown signal.")
-            nodeRoute.setConnectedState(False)
-            connection.close()
-        else:
-            logger.info(f'Thread abnormal shutdown.')
-            nodeRoute.setConnectedState(False)
-            connection.close()
-
-        
-        # Publish our stats really quick
-        with self.statsLock:
-            self.handledIncomingBytes += ourHandledBytes
-            self.handledOutgoingBytes += ourOutgoingBytes
-            self.respondedToRequests += ourHandledRequests
-        
+ 
     def __networkController__(self):
         logger.info("Network controller thread started.")
 
-        # Wait for both the inbound and outbound threads to be started completely...
-        while not self.inboundThread.is_alive() and not self.outboundThread.is_alive():
-            time.sleep(0.5)
+        # Quickly see if we have saved ourselves a UUID + add stuff to DHT
+        if not self.secureEnclave.isEncKey("selfUUID"):
+            self.uuid = uuid.uuid4()
+            logger.info(f"Network controller new UUID is: {self.uuid}")
+            self.secureEnclave.insertData("selfUUID", self.uuid)
+        else:
+            self.uuid = self.secureEnclave.returnData("selfUUID")
         
-        logger.info("Controller repopulating connections...")
-
+        self.dht.setRequest(f'{self.uuid}_pubkey', self.secureEnclave.assignedIdentity.publicKey.save_pkcs1())
+        self.dht.setRequest(f'{self.uuid}_nodeport', self.nodePort)
+        
+    
         # Startup up procedure
         # Check state of nodes in enclave
         if not self.secureEnclave.isEncKey("knownNodes"):
@@ -741,16 +265,16 @@ class brNodeServer:
             hostname = socket.gethostname()
             usIP = socket.gethostbyname(hostname)
 
-            if Path('core/seedservers.txt').is_file():
-                with open('core/seedservers.txt') as file:
+            if Path('seedservers.txt').is_file():
+                with open('seedservers.txt') as file:
                     for line in file:
 
                         linesplit = line.split(":")
 
                         if len(linesplit) == 3:
                             ip = linesplit[0]
-                            webport = int(linesplit[1])
-                            port = int(linesplit[2])
+                            port = int(linesplit[1])
+                            webport = int(linesplit[2])
                         else:
                             ip = line
                             webport = 80
@@ -762,15 +286,14 @@ class brNodeServer:
                             newNodeObject.nodeIP = ip
                             newNodeObject.nodePort = port
                             newNodeObject.webPort = webport
-                            with self.connPoolLock:
-                                if newNodeObject.queryPubKey():  # TODO: Add check - and ip != usIP
-                                    pendingRoute = brRoute(brRoute.brRouteType.TEST, None, newNodeObject)
-                                    self.pendingConnect.append(pendingRoute)
-                                else:
-                                    logger.error(f'Seed server {ip} did not respond correctly when we asked for their public key. (Security Issue?)')
+                            if newNodeObject.queryPubKey():  # TODO: Add check - and ip != usIP
+                                pendingRoute = brRoute(brRoute.brRouteType.TEST, None, newNodeObject, brRoute.brConnectionDirection.INITIATED)
+                                self.socketControl.connectRequest.put(pendingRoute)
+                            else:
+                                logger.error(f'Seed server {ip} did not respond correctly when we asked for their public key. (Security Issue?)')
                         except:
                             logger.error(f'A line in the seedservers list is not a valid IP address or seed server. -> {line}')
-                logger.info(f"Primed nodes list for new node setup. {len(self.pendingConnect)} connection(s) added for startup.")
+                #logger.info(f"Primed nodes list for new node setup. {len(self.pendingConnect)} connection(s) added for startup.")
         else:
             nodelist:list[brNodeRecord] = self.secureEnclave.returnData("knownNodes")
             for node in nodelist:
@@ -778,9 +301,8 @@ class brNodeServer:
                 # Since pickle cannot store thread locks, we must be careful and re-populate this
                 node.recordThreadLock = threading.Lock()
 
-                pendingRoute = brRoute(brRoute.brRouteType.TEST, None, node)
-                with self.connPoolLock:
-                    self.pendingConnect.append(pendingRoute)
+                pendingRoute = brRoute(brRoute.brRouteType.TEST, None, node, brRoute.brConnectionDirection.INITIATED)
+                self.socketControl.connectRequest.put(pendingRoute)
             logger.info(f'Finished adding {len(nodelist)} nodes to reconnect to...')
 
         

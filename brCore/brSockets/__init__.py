@@ -3,6 +3,7 @@ from .. import loggingfactory
 
 brNodeHsLog = loggingfactory.getDefaultLogger()
 brAgentLog = loggingfactory.getDefaultLogger()
+brNodeCoreLog = loggingfactory.getDefaultLogger()
 
 # Import protocols
 import brCore.brSockets.brProtocols

@@ -92,8 +92,8 @@ class brNode:
             self.mainEnclave = Enclave(brCoreSettings.getStrSetting('enclave','enclave-name'), pathtouse=self.temppath)
         self.enclaveDHTStorage = EnclaveStorage(self.mainEnclave)
         
-    def startWebServer(self):
-        self.webServer = brWebCore.brWebServer(bindAddress=self.webservAddress, httpPort=self.webPort, debug=self.debug)
+    def startWebServer(self, bindAddress:str="127.0.0.1", port:int=11000, debug:bool=False):
+        self.webServer = brWebCore.brWebServer(bindAddress=bindAddress, httpPort=port, debug=debug)
         self.brWebUI = brWebElements.brWebUIModule(self.mainEnclave)
         self.webServer.buildRoute(brWebCore.brWebServer.route.GET_ROUTE, "/", self.brWebUI.brUIRoot)
         self.webServer.buildRoute(brWebCore.brWebServer.route.GET_ROUTE, "/stats", self.brWebUI.statsPage)
@@ -102,7 +102,7 @@ class brNode:
         self.webServer.buildRoute(brWebCore.brWebServer.route.GET_ROUTE, "/announce", self.brWebUI.brAnnounce)
         self.webServer.buildRoute(brWebCore.brWebServer.route.POST_ROUTE, "/announce/publickey", self.brWebUI.brAnnouncePost)
         self.webServer.startServer()
-        logging.info(f"Backrooms configured to run a webserver on: {self.webservAddress}:{self.webPort}")
+        logging.info(f"Backrooms configured to run a webserver on: {bindAddress}:{port}")
         time.sleep(5)
         if not self.webServer.running:
             logging.error("Webserver hasn't opened in the expected time! Exiting main thread...")
@@ -126,11 +126,10 @@ class brNode:
         if self.mainEnclave.isEncKey("dhtbootstrap"):
             logging.info("Found bootstrap entry in Enclave")
             self.mainDHT.setBootstrapList(self.mainEnclave.returnData("dhtbootstrap"))
-        self.mainDHT.setRequest(self.friendlyName, self.mainEnclave.returnData("PublicKey").save_pkcs1())
         self.mainDHT.asyncThread.start()
         
-    def startNodeServer(self):
-        self.nodeServer = brNodeNetworkCore.brNodeServer(self.mainEnclave, self.webservAddress, self.brNodePort, self.webPort, self.debug)
+    def startNodeServer(self, brNodeBindAddress:str="127.0.0.1", brNodePort:int=13337, debug:bool=False):
+        self.nodeServer = brNodeNetworkCore.brNodeServer(self.mainEnclave, self.mainDHT, brNodeBindAddress, brNodePort, self.webServer.httpPort, debug)
         self.nodeServer.startServer()
         logging.info(f"Node name: {self.friendlyName}")
         

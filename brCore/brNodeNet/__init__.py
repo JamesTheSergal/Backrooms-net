@@ -1,4 +1,4 @@
 from .. import loggingfactory
-brWebLog = loggingfactory.getDefaultLogger()
+brNodeCoreLog = loggingfactory.getDefaultLogger()
 from brCore.brNodeNet import brNodeNetworkCore
 from brCore.brNodeNet import brDHT

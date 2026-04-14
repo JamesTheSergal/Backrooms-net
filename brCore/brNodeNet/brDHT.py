@@ -57,6 +57,7 @@ class brDHT:
         else:
             self.dhtServer = Server(storage=enclaveStorage)
             
+            
         self.asyncloop.run_until_complete(self.dhtServer.listen(self.serverport))
         
         self.asyncloop.create_task(self.request_loop())
@@ -102,3 +103,10 @@ class brDHT:
     def __runnerThread__(self):
         self.asyncloop.run_forever()
         log.info("DHT Server Async Thread got shutdown signal.")
+        
+    def returnDHTLongID(self):
+        return self.dhtServer.node.long_id
+    
+    def returnDHTIP(self):
+        return self.dhtServer.node.ip
+    
