@@ -72,23 +72,24 @@ class brPacket:
         INTRODUCE = 0
         READY = 1
         NODE_INFO = 2       # Used to exchange info about the node. One way.
-        CHALLENGE = 3
-        CHALLENGE_RES = 4
+        INCREASE_ENCR = 3   # To notify the node that we are increasing coms
+        CHALLENGE = 4
+        CHALLENGE_RES = 5
 
         # Encryption
-        ENCR_COMMS = 5      # Sent when nodes finally upgrade to encrypted communications
+        ENCR_COMMS = 6      # Sent when nodes finally upgrade to encrypted communications
 
         # Utility
-        ASK_FOR_FRIENDS = 6
-        FRIEND_ANNOUNCE = 7
-        PING = 8
-        CALLBACK_PING = 9   # Absolute Solver - Used to provide a window for response
-        UR_BEHIND_NAT = 10  # Message type to send when we think a remote node is behind a NAT.
+        ASK_FOR_FRIENDS = 7
+        FRIEND_ANNOUNCE = 8
+        PING = 9
+        CALLBACK_PING = 10   # Absolute Solver - Used to provide a window for response
+        UR_BEHIND_NAT = 11  # Message type to send when we think a remote node is behind a NAT.
 
         # Message Handling
-        NEW_MESSAGE = 11    # Packet will contain the number of packets after this one to be received
-        READY_MESSAGE = 12  # Response that we are ready to receive sequence
-        MESSAGE = 13        # Data to receive
+        NEW_MESSAGE = 12    # Packet will contain the number of packets after this one to be received
+        READY_MESSAGE = 13  # Response that we are ready to receive sequence
+        MESSAGE = 14        # Data to receive
         
         
     def __init__(self, receivedPacket:bytes=None) -> None:
