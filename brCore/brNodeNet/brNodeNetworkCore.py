@@ -340,7 +340,18 @@ class brNodeServer:
 
             looptime = time.time()
             
-            time.sleep(0.5)
+            if self.secureEnclave.isEncKey("connect_ip"):
+                logger.info("Got connection request from the web server")
+                newNodeObject = brNode()
+                newNodeObject.nodeIP = self.secureEnclave.returnData("connect_ip")
+                newNodeObject.nodePort = self.secureEnclave.returnData("connect_port")
+                self.secureEnclave.deleteKey("connect_ip")
+                self.secureEnclave.deleteKey("connect_port")
+                
+                pendingRoute = brRoute(brRoute.brRouteType.TEST, None, newNodeObject, brRoute.brConnectionDirection.INITIATED)
+                self.socketControl.connectRequest.put(pendingRoute)
+            
+            time.sleep(1)
         
         # Broke out, begin shutting down and saving node/route states.
         #logger.info("Controller is waiting for all other threads to shut down before saving...")

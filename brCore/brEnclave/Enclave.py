@@ -269,5 +269,14 @@ class Enclave:
             return self.__data[key]
         else:
             raise Enclave.enclaveValueDoesNotExist(key)
+        
+    def deleteKey(self, key):
+        self.logger.warning(f"Enclave delete key was called on key:{key} (Doesn't happen that often)")
+        if self.isEncKey(key):
+            with self.__threadLock:
+                del self.__data[key]
+                data_hash = self.__dataHashes[key]
+                del self.__dataHashes[key]
+                del self.__reverseHash[data_hash]
 
 # NOTE: Todo: Implement encryptedHash usage (e.g., hash encrypted chunks and check before decrypt). Also, consider adding deleteEntry method.

@@ -5,6 +5,10 @@ from brCore.loggingfactory import timeProfiler
 from brCore import BR_VERSION
 import threading
 import uuid
+import urllib.parse  # Add this import for parsing form data
+from . import brWebLog
+
+logger = brWebLog
 
 
 # I did not write this
@@ -69,6 +73,18 @@ def genFooter():
     )
     return content
 
+def genIPPortForm(postEndpoint, ipLabel, ipName, portLabel, portName, buttonText):
+    content = (
+        f'<form action="{postEndpoint}" method="post">\n'
+        f'<label for="{ipName}">{ipLabel}</label>\n'
+        f'<input type="text" id="{ipName}" name="{ipName}" placeholder="e.g., 192.168.1.1"><br>\n'
+        f'<label for="{portName}">{portLabel}</label>\n'
+        f'<input type="number" id="{portName}" name="{portName}" placeholder="e.g., 8080" min="1" max="65535"><br>\n'
+        f'<input type="submit" value="{buttonText}">\n'
+        f'</form>\n'
+    )
+    return content
+
 def genForm(postEndpoint, formName, dataName, formButtonText):
         content = (
             f'<form action={postEndpoint} method="post">\n'
@@ -96,6 +112,69 @@ class brWebUIModule(brWebPage):
         super().__init__()
         self.secureEnclave = secureEnclave # Threading locks are already implemented in the Enclave
         pass
+    
+    def insecureAnnounce(self, context: brWebServer.packetParser):
+        self.addContent(
+            genHeader() +
+            genNavBar() +
+            genBody(
+                "<h2>Insecure Connection Form</h2>\n" +
+                "<p>Enter the IP address and port to connect to. This data will be stored in the Enclave for later use.</p>\n" +
+                genIPPortForm("/insecureannounce", "IP Address", "ip_address", "Port", "port", "Submit")
+            ) +
+            genFooter()
+        )
+        self.setOK()
+        return self.buildResponse(context)
+    
+    def insecureAnnouncePost(self, context: brWebServer.packetParser):
+        try:
+            # Parse the POST body (assumes application/x-www-form-urlencoded)
+                                                                         #TODO: BUG. brWebCore post submission logic issue
+                                                                         #when parsing the packet, bodyData is set as packetBytes[bodyDataIndex:len(packetBytes)], 
+                                                                         #where bodyDataIndex is the position of b'\r\n\r\n'. 
+                                                                         #This means bodyData starts with the literal bytes b'\r\n\r\n' (which decodes to '\r\n\r\n'), 
+                                                                         #followed by the actual form data.
+            body_str = context.bodyData.decode('utf-8').lstrip('\r\n')  # Strip leading \r\n\r\n to get clean form data
+            parsed = urllib.parse.parse_qs(body_str)
+            
+            ip = parsed.get('ip_address', [''])[0].strip()
+            port_str = parsed.get('port', ['0'])[0].strip()
+            
+            # Basic validation
+            if not ip or not port_str.isdigit():
+                raise ValueError("Invalid IP or port provided.")
+            
+            port = int(port_str)
+            
+            # Store in Enclave
+            self.secureEnclave.updateEntry("connect_ip", ip, create=True)
+            self.secureEnclave.updateEntry("connect_port", port, create=True)
+            
+            self.addContent(
+                genHeader() +
+                genNavBar() +
+                genBody(
+                    "<h2>Success</h2>\n" +
+                    f"<p>Data submitted: IP={ip}, Port={port}. Stored in Enclave.</p>\n"
+                ) +
+                genFooter()
+            )
+            self.setOK()
+        except Exception as e:
+            logger.error(f"Error processing form submission: {e}")
+            self.addContent(
+                genHeader() +
+                genNavBar() +
+                genBody(
+                    "<h2>Error</h2>\n" +
+                    "<p>Failed to process submission. Please check your input and try again.</p>\n"
+                ) +
+                genFooter()
+            )
+            self.setError()
+        
+        return self.buildResponse(context)
 
     def brUIRoot(self, context: brWebServer.packetParser):
         self.addContent(
@@ -116,7 +195,6 @@ class brWebUIModule(brWebPage):
         self.setOK()
         return self.buildResponse(context)
         
-    
     def brAnnouncePost(self, context: brWebServer.packetParser):
         self.addContent(context.bodyData)
         self.setOK()
