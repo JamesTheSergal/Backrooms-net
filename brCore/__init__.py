@@ -39,7 +39,6 @@ else:
 
 # Sockets and network
 import brCore.brSockets
-from brCore.brSockets.brNodeAgent import brSocketAgent
 import brCore.brNodeNet
 from brCore.brNodeNet import brNodeNetworkCore
 from brCore.brNodeNet.brDHT import brDHT

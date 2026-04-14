@@ -3,19 +3,23 @@ import time
 import uuid
 
 import requests
+
+from .brRoute import brRoute
 from . import brNodeCoreLog
 logger = brNodeCoreLog
 
 from brCore.brEnclave.Identity import Identity
 
-class brNodeRecord:
+class brNode:
 
     def __init__(self):
-        # Connection
+        # Node details
         self.nodeIP:str = None
         self.nodePort:int = 443
         self.webPort:int = 80
         self.dhtport:int = None
+        
+        # State
         self.lastLatency = 0
         self.connected = False
         self.finishedUnencryptedHandshake = False
@@ -30,7 +34,7 @@ class brNodeRecord:
         self.firstSeen = time.time()
         self.lastSeen = 0
         self.recordThreadLock = threading.Lock()
-        self.participatingInRoutes = []
+        self.participatingInRoutes:list[brRoute] = []
 
         logger.info(f'New node record ID: {self.localNodeID}')
 
@@ -72,3 +76,14 @@ class brNodeRecord:
     def setNodeUUID(self, newuuid):
         logger.info(f"Changing node id from {self.localNodeID} to {newuuid}")
         self.localNodeID = newuuid
+        
+    def makeDHTAnnounceDict(self, controllerID):
+        key = f'{self.localNodeID}_node_unconfirmed_by_{controllerID}'
+        data = {'nodeIP': self.nodeIP,
+                'nodePort': self.nodePort,
+                'webPort': self.webPort,
+                'dhtport': self.dhtport,
+                'friendlyName': self.friendlyName,
+                'firstSeen': self.firstSeen,
+                'lastSeen': self.lastSeen}
+        return (key, data)

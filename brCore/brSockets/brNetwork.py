@@ -3,9 +3,10 @@ import threading
 import time
 from queue import Queue, Empty
 from . import brAgentLog
-from .brNodeRecord import brNodeRecord
+from ..brNodeNet.brNode import brNode
 from ..brNodeNet.brRoute import brRoute
 from ..brSockets.brPacket import brPacket
+from .brHandshake import brHandshake, brControllerRequest
 
 logger = brAgentLog
 
@@ -24,7 +25,7 @@ class brNetwork:
         self.controllerLock = threading.Lock()
         
         # Tracking
-        self.trackedConnections:dict[str][brNodeRecord] = {} # Key is IP address
+        self.trackedConnections:dict[str][brNode] = {} # Key is IP address
         
         # Stats
         self.statsLock = threading.Lock()
@@ -73,7 +74,7 @@ class brNetwork:
                 if nodeIP in self.trackedConnections.keys():
                     pendingNode = self.trackedConnections[nodeIP]
                 else:
-                    pendingNode = brNodeRecord()
+                    pendingNode = brNode()
                     pendingNode.setNodeAddress(address)
                     with self.controllerLock:
                         self.trackedConnections[nodeIP] = pendingNode
@@ -156,12 +157,72 @@ class brNetwork:
         #            self.outboundNodeThreads.remove(thr)
                 
         #logger.info("All threads closed. Exiting main loop.")
+    
+    def __handshakeSafeLoop__(self, nodeRoute:brRoute):
         
+        netAddress = nodeRoute.externalNode.nodeIP
+        netPort = nodeRoute.externalNode.nodePort
+        connection = nodeRoute.assignedConn
+        
+        # Check if we are the initiator and send introduction packet
+        if nodeRoute.connectionType is brRoute.brConnectionDirection.INITIATED:
+            sequence:Queue = brHandshake.brInitiateBasicHandshake()
+            runnable = sequence.get()
+            message = runnable()
+            try:
+                connection.send(message)
+                logger.info(f"Sent introduction packet to {netAddress}")
+            except:
+                logger.exception("We attempted to initiate the connection and failed to get a proper response!", exc_info=True)
+        else:
+            sequence:Queue = brHandshake.brReceiveBasicHandshake()
+            
+        while nodeRoute.externalNode.finishedUnencryptedHandshake is False:
+            
+            # Receive action
+            try:
+                rawpacket = connection.recv(1500)  # TODO: Set time-out to kill threads we aren't using
+                #ourHandledBytes += len(rawpacket)
+                message = brPacket(rawpacket)
+                nodeRoute.mostRecentPacket = message
+            except:
+                logger.exception("Critical error when receiving data!", exc_info=True)
+                break
+            
+            runnable = sequence.get()
+            result = runnable(message)
+            
+            if type(result) is brHandshake.handshakeResult:
+                result:brHandshake.handshakeResult
+                if result.error is False:
+                    runnable = sequence.get()
+                    result = runnable()
+                    if type(result) is bytes:
+                        connection.send(result)
+                    elif type(result) is brControllerRequest:
+                        result:brControllerRequest
+                        result.routeInfo = nodeRoute
+                        self.toRouter.put(result)
+                        logger.info("Waiting for controller request to complete...")
+                        result.waitForRequestComplete()
+                        logger.info("Request completed")
+                        connection.send(result.response)
+                else:
+                    logger.error(f'Error with handshake validation: {result.additionalInfo} {result.rawData}')
+                    connection.close()
+                    break
+            elif type(result) is bytes:
+                pass
+
+            
+            
+    
     def __connectionThread__(self, nodeRoute:brRoute):
 
         netAddress = nodeRoute.externalNode.nodeIP
         netPort = nodeRoute.externalNode.nodePort
         connection = nodeRoute.assignedConn
+        
 
         # Statistics gathering
         ourHandledBytes = 0
@@ -169,20 +230,8 @@ class brNetwork:
         ourHandledRequests = 0
         # ----
 
-
-        # Check if we are the initiator and send introduction packet
-        if nodeRoute.connectionType is brRoute.brConnectionDirection.INITIATED:
-            message = brPacket().createSimpleHello()
-            #ourConfig = f'{self.insecurePort}-{self.nodePort}'.encode('utf-8')
-            #message.data = ourConfig
-            #packet = message.buildPacket()
-            try:
-                connection.send(message)
-                logger.info(f"Sent introduction packet to {netAddress}")
-            except:
-                logger.exception("We attempted to initiate the connection and failed to get a proper response!", exc_info=True)
-            
-
+        self.__handshakeSafeLoop__(nodeRoute=nodeRoute)
+        
         # START OF CONTINUOUS LOOP
         #
         #
@@ -225,6 +274,8 @@ class brNetwork:
             fullHandshake = nodeRoute.externalNode.finishedHandshake
   
             # if conditions are met, send to router 
+            
+
             if message.messageType is brPacket.brMessageType.INTRODUCE or brPacket.brMessageType.READY:
                 try:
                     self.toRouter.put(nodeRoute)

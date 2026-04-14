@@ -13,8 +13,9 @@ import requests
 from . import brNodeCoreLog
 from brCore.brSockets.brPacket import brPacket
 from brCore.brEnclave.Enclave import Enclave
-from ..brSockets.brNodeRecord import brNodeRecord
+from .brNode import brNode
 from ..brSockets.brNetwork import brNetwork
+from ..brSockets.brHandshake import brHandshake, brControllerRequest
 from .brRoute import brRoute
 from .brDHT import brDHT
 
@@ -96,11 +97,7 @@ class brNodeServer:
 
         # Network controller specific
         self.uuid = None
-        self.controllerLock = threading.Lock()
-        self.ourClients = {}
-        self.knownClients = {}
-        self.knownNodes:dict[str][brNodeRecord] = {} # Key is IP address
-        self.globalAnnounce:list = []
+        self.knownNodes:dict[str][brNode] = {} # Key is IP address
         # Controller Notes
         # Keys in Enclave:
         # knownNodes
@@ -129,15 +126,52 @@ class brNodeServer:
             self.routerThread.start()
             self.controllerThread.start()
             
-            
-            
-
     def shutdownServer(self):
         self.shutdown = True
         self.socketControl.shutdown = True
         logger.info("Sent shutdown signal - Node Main Thread is now waiting...")
         # Fix this later
+    
+    def generateRoutesFromSeedFile(self, filepath:str='seedservers.txt') -> list[brRoute]:
+        allroutes = []
+        with open('seedservers.txt') as file:
+            for line in file:
+                linesplit = line.split(":")
+                if len(linesplit) == 3:
+                    ip = linesplit[0]
+                    port = int(linesplit[1])
+                    webport = int(linesplit[2])
+                else:
+                    ip = line
+                    port = 80
+                    webport = 443
+                try:
+                    socket.inet_aton(ip) # Will fail if it isn't a proper IP address
+                    newNodeObject = brNode()
+                    newNodeObject.nodeIP = ip
+                    newNodeObject.nodePort = port
+                    newNodeObject.webPort = webport
+                    if newNodeObject.queryPubKey():  # TODO: Add check - and ip != usIP
+                        pendingRoute = brRoute(brRoute.brRouteType.TEST, None, newNodeObject, brRoute.brConnectionDirection.INITIATED)
+                        allroutes.append(pendingRoute)
+                    else:
+                        logger.error(f'Seed server {ip} did not respond correctly when we asked for their public key. (Security Issue?)')
+                except:
+                    logger.error(f'A line in the seedservers list is not a valid IP address or seed server. -> {line}')
+        return allroutes
+    
+    def generateRoutesFromEnclaveSave(self)-> list[brRoute]:
+        allroutes = []
+        nodelist:list[brNode] = self.secureEnclave.returnData("knownNodes")
+        for node in nodelist:
 
+            # Since pickle cannot store thread locks, we must be careful and re-populate this
+            node.recordThreadLock = threading.Lock()
+
+            pendingRoute = brRoute(brRoute.brRouteType.TEST, None, node, brRoute.brConnectionDirection.INITIATED)
+            allroutes.append(pendingRoute)
+        
+    
     def __debugToFile__(data: bytes, id, count):
         tempdir = Path(f'temp/{id}')
         if not tempdir.is_dir():
@@ -157,25 +191,44 @@ class brNodeServer:
                 time.sleep(0.25)
 
             if job is not None:
-                if job.mostRecentPacket is not None:
-                    if job.mostRecentPacket.messageType is brPacket.brMessageType.INTRODUCE and job.externalNode.finishedUnencryptedHandshake is False:
-                        job.outbox.put(brPacket().createSimpleReady())
-                        job.routerPerformedAction()
-                    if job.mostRecentPacket.messageType is brPacket.brMessageType.READY and job.externalNode.finishedUnencryptedHandshake is False:
-                        logger.info("Got ready from unknown node, sending config data")
+                if type(job) is brControllerRequest:
+                    job:brControllerRequest
+                    
+                    if job.requesttype is brControllerRequest.requestType.REQUEST_CONFIG_DICT:
                         config = {'uuid': self.uuid, 'dhtport': self.dht.dhtServer.node.port, 'webport': self.webPort}
                         configMessage = brPacket().setMessageType(brPacket.brMessageType.NODE_INFO)
                         configMessage.insertObject(config)
-                        job.outbox.put(configMessage.buildPacket())
-                        job.routerPerformedAction()
-                    if job.mostRecentPacket.messageType is brPacket.brMessageType.NODE_INFO and job.externalNode.finishedUnencryptedHandshake is False:
-                        logger.info("Received node info packet from external node")
-                        configobj = job.mostRecentPacket.rebuildObject()
-                        job.externalNode.setNodeUUID(configobj['uuid'])
-                        job.externalNode.dhtport = configobj['dhtport']
-                        job.externalNode.webPort = configobj['webport']
+                        job.completeRequest(configMessage.buildPacket())
+                    elif job.requesttype is brControllerRequest.requestType.PARSE_RECEIVED_CONFIG:
+                        route = job.routeInfo
+                        externalConfig = job.data
+                        
+                        route.externalNode.setNodeUUID(externalConfig['uuid'])
+                        route.externalNode.dhtport = externalConfig['dhtport']
+                        route.externalNode.webPort = externalConfig['webport']
+                        job.completeRequest(brPacket().createSimpleReady())
+                    elif job.requesttype is brControllerRequest.requestType.COMPLETE_BASIC_HANDSHAKE:
+                        route = job.routeInfo
+                        route.externalNode.finishedUnencryptedHandshake = True
+                        job.completeRequest()
+                #if job.mostRecentPacket is not None:
+                #    if job.mostRecentPacket.messageType is brPacket.brMessageType.INTRODUCE and job.externalNode.finishedUnencryptedHandshake is False:
+                #        job.outbox.put(brPacket().createSimpleReady())
+                #        job.routerPerformedAction()
+                #    if job.mostRecentPacket.messageType is brPacket.brMessageType.READY and job.externalNode.finishedUnencryptedHandshake is False:
+                #        logger.info("Got ready from unknown node, sending config data")
+                #        config = {'uuid': self.uuid, 'dhtport': self.dht.dhtServer.node.port, 'webport': self.webPort}
+                #        configMessage = brPacket().setMessageType(brPacket.brMessageType.NODE_INFO)
+                #        configMessage.insertObject(config)
+                #        job.outbox.put(configMessage.buildPacket())
+                #        job.routerPerformedAction()
+                #    if job.mostRecentPacket.messageType is brPacket.brMessageType.NODE_INFO and job.externalNode.finishedUnencryptedHandshake is False:
+                #        logger.info("Received node info packet from external node")
+                #        configobj = job.mostRecentPacket.rebuildObject()
+                #        job.externalNode.setNodeUUID(configobj['uuid'])
+                #        job.externalNode.dhtport = configobj['dhtport']
+                #        job.externalNode.webPort = configobj['webport']
                     
-    
     def __routerOld__(self):
         if packet.messageType == brPacket.brMessageType.INTRODUCE:
 
@@ -245,6 +298,11 @@ class brNodeServer:
  
     def __networkController__(self):
         logger.info("Network controller thread started.")
+        
+        # Get useful network info
+        hostname = socket.gethostname()
+        usIP = socket.gethostbyname(hostname)
+        logger.info(f'Controller reports IP address is: {usIP}')
 
         # Quickly see if we have saved ourselves a UUID + add stuff to DHT
         if not self.secureEnclave.isEncKey("selfUUID"):
@@ -257,53 +315,21 @@ class brNodeServer:
         self.dht.setRequest(f'{self.uuid}_pubkey', self.secureEnclave.assignedIdentity.publicKey.save_pkcs1())
         self.dht.setRequest(f'{self.uuid}_nodeport', self.nodePort)
         
-    
-        # Startup up procedure
-        # Check state of nodes in enclave
-        if not self.secureEnclave.isEncKey("knownNodes"):
-            # Lets get our hostname + IP to make sure we don't add ourselves to the seed list
-            hostname = socket.gethostname()
-            usIP = socket.gethostbyname(hostname)
-
-            if Path('seedservers.txt').is_file():
-                with open('seedservers.txt') as file:
-                    for line in file:
-
-                        linesplit = line.split(":")
-
-                        if len(linesplit) == 3:
-                            ip = linesplit[0]
-                            port = int(linesplit[1])
-                            webport = int(linesplit[2])
-                        else:
-                            ip = line
-                            webport = 80
-                            port = 443
-
-                        try:
-                            socket.inet_aton(ip) # Will fail if it isn't a proper IP address
-                            newNodeObject = brNodeRecord()
-                            newNodeObject.nodeIP = ip
-                            newNodeObject.nodePort = port
-                            newNodeObject.webPort = webport
-                            if newNodeObject.queryPubKey():  # TODO: Add check - and ip != usIP
-                                pendingRoute = brRoute(brRoute.brRouteType.TEST, None, newNodeObject, brRoute.brConnectionDirection.INITIATED)
-                                self.socketControl.connectRequest.put(pendingRoute)
-                            else:
-                                logger.error(f'Seed server {ip} did not respond correctly when we asked for their public key. (Security Issue?)')
-                        except:
-                            logger.error(f'A line in the seedservers list is not a valid IP address or seed server. -> {line}')
-                #logger.info(f"Primed nodes list for new node setup. {len(self.pendingConnect)} connection(s) added for startup.")
-        else:
-            nodelist:list[brNodeRecord] = self.secureEnclave.returnData("knownNodes")
-            for node in nodelist:
-
-                # Since pickle cannot store thread locks, we must be careful and re-populate this
-                node.recordThreadLock = threading.Lock()
-
-                pendingRoute = brRoute(brRoute.brRouteType.TEST, None, node, brRoute.brConnectionDirection.INITIATED)
+        # Rebuild and startup procedure
+        # 
+        #
+        if self.secureEnclave.isEncKey("knownNodes"):
+            routes = self.generateRoutesFromEnclaveSave()
+            for pendingRoute in routes:
                 self.socketControl.connectRequest.put(pendingRoute)
-            logger.info(f'Finished adding {len(nodelist)} nodes to reconnect to...')
+            logger.info(f'Finished adding {len(routes)} routes from the Enclave to reconnect to...')
+            
+        else:
+            if Path('seedservers.txt').is_file():
+                routes = self.generateRoutesFromSeedFile('seedservers.txt')
+                for pendingRoute in routes:
+                    self.socketControl.connectRequest.put(pendingRoute)
+                logger.info(f'Finished adding {len(routes)} routes from the Enclave to reconnect to...')
 
         
         logger.info("Network controller ready.")
@@ -314,24 +340,18 @@ class brNodeServer:
 
             looptime = time.time()
             
-            # Scan routes for changes
-            for route in self.controlRoutes:
-                if route.controllerLastSeen == 0:
-                    logger.info(f"Controller is ready to use route-{route.routeID}")
-                    route.controllerLastSeenNow()
-            
             time.sleep(0.5)
         
         # Broke out, begin shutting down and saving node/route states.
-        logger.info("Controller is waiting for all other threads to shut down before saving...")
-        while self.inboundThread.is_alive() and self.outboundThread.is_alive():
-            time.sleep(0.2)
+        #logger.info("Controller is waiting for all other threads to shut down before saving...")
+        #while self.inboundThread.is_alive() and self.outboundThread.is_alive():
+            #time.sleep(0.2)
         
         #TODO: at a later date, make routes restorable
         logger.info("Saving node data - Gathering nodes...")
         nodeGather = []
         for nodeIP in self.knownNodes.keys():
-            node:brNodeRecord = self.knownNodes[nodeIP]
+            node:brNode = self.knownNodes[nodeIP]
             node.setNodeDisconnectedState()
             nodeGather.append(node)
         

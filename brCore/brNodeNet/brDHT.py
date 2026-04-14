@@ -5,6 +5,8 @@ import time
 from kademlia.network import Server
 from threading import Thread
 import logging
+
+from brCore.brEnclave import Enclave
 from . import loggingfactory
 
 log = loggingfactory.getDefaultLogger()
@@ -109,4 +111,8 @@ class brDHT:
     
     def returnDHTIP(self):
         return self.dhtServer.node.ip
+
+class brDHTQueryHelper:
     
+    def __init__(self, dhtserver:brDHT, enclave:Enclave):
+        pass

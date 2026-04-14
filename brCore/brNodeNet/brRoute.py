@@ -6,7 +6,7 @@ import threading
 import time
 import uuid
 from . import brNodeCoreLog
-from ..brSockets.brNodeRecord import brNodeRecord
+from . import brNode
 from ..brSockets.brPacket import brPacket
 logger = brNodeCoreLog
 
@@ -24,7 +24,7 @@ class brRoute:
         INITIATED = 0
         RECEIVED = 1
 
-    def __init__(self, routeType:brRouteType, assignedConnection:socket.socket, externalNode:brNodeRecord, connectionType:brConnectionDirection):
+    def __init__(self, routeType:brRouteType, assignedConnection:socket.socket, externalNode:brNode, connectionType:brConnectionDirection):
         
         # Route Info
         self.routeID = uuid.uuid4()
@@ -40,7 +40,7 @@ class brRoute:
         self.connThread: threading.Thread = None
         
         # External Node info
-        self.externalNode:brNodeRecord = externalNode # Would be the node Record 
+        self.externalNode:brNode = externalNode # Would be the node Record 
         
         # Locks
         self.routeThreadLock = threading.Lock()
@@ -120,3 +120,13 @@ class brRoute:
     def removeRouteReference(self):
         with self.externalNode.recordThreadLock:
             self.externalNode.participatingInRoutes.remove(self)
+            
+    def makeDHTAnnounceDict(self, controllerID):
+        key = f'{self.routeID}_route'
+        data = {'routeType': self.route.routeType,
+                'connectingFrom': self.route.connectingFrom,
+                'connectingTo': self.route.connectingTo,
+                'externalNode': self.route.externalNode.localNodeID,
+                'timeToLive': self.route.timeToLive,
+                'routeState': self.route.routeState}
+        return (key, data)
