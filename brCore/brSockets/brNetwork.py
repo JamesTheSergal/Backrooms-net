@@ -6,15 +6,19 @@ from . import brAgentLog
 from ..brNodeNet.brNode import brNode
 from ..brNodeNet.brRoute import brRoute
 from ..brSockets.brPacket import brPacket
+from ..brSockets.netconnection import netconnection
+from ..brEnclave.Enclave import Enclave
 from .brHandshake import brHandshake, brControllerRequest
 
 logger = brAgentLog
 
 class brNetwork:
     
-    def __init__(self, debug:bool=False):
+    def __init__(self, secureEnclave:Enclave, debug:bool=False):
         
         self.shutdown = False
+
+        self.secureEnclave = secureEnclave
     
         # Threads
         self.listenerThreads:list[threading.Thread] = []
@@ -25,7 +29,7 @@ class brNetwork:
         self.controllerLock = threading.Lock()
         
         # Tracking
-        self.trackedConnections:dict[str][brNode] = {} # Key is IP address
+        self.trackedConnections:list[netconnection] = [] # Key is IP address
         
         # Stats
         self.statsLock = threading.Lock()
@@ -69,16 +73,14 @@ class brNetwork:
                 connection, address = soc.accept()
 
                 # Check to see if we have seen this connection before
-                nodeIP = address[0]
+                ip = address[0]
+                port = address[1]
 
-                if nodeIP in self.trackedConnections.keys():
-                    pendingNode = self.trackedConnections[nodeIP]
-                else:
-                    pendingNode = brNode()
-                    pendingNode.setNodeAddress(address)
-                    with self.controllerLock:
-                        self.trackedConnections[nodeIP] = pendingNode
-                    
+                trackconnection = netconnection(connection, ip, port, True, encryptionident=self.secureEnclave.assignedIdentity)
+                self.trackedConnections.append(trackconnection)
+                
+                pendingNode = brNode()
+                pendingNode.setNodeAddress(address)
 
                 pendingRoute = brRoute(brRoute.brRouteType.TEST, connection, pendingNode, brRoute.brConnectionDirection.RECEIVED)
 

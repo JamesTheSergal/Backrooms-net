@@ -10,6 +10,7 @@ import threading
 import time
 import uuid
 import requests
+from ..upnphelper import configureUPNP, removeUPNP
 from . import brNodeCoreLog
 from brCore.brSockets.brPacket import brPacket
 from brCore.brEnclave.Enclave import Enclave
@@ -81,6 +82,7 @@ class brNodeServer:
         self.bindAddress = bindAddress
         self.nodePort:int = nodePort
         self.webPort:int = webPort
+        self.externalIP: int = None
         # ------------
 
         # Secure Enclave for peer stats
@@ -115,19 +117,26 @@ class brNodeServer:
         
 
         # Socket Control Module
-        self.socketControl = brNetwork()
+        self.socketControl = brNetwork(self.secureEnclave)
+ 
 
     def startServer(self):
+        result = configureUPNP(self.nodePort, "TCP", "Backrooms-net Node")
+        if result is not False:
+            self.externalIP = result
+            logger.info("UPNP configured for Node Server.")
+            
         logger.info("Started node server.")
         if not self.running:
-            self.socketControl.startListener(bindAddress="127.0.0.1", nodePort=self.nodePort)
-            self.socketControl.startInitiator(bindAddress="127.0.0.1")
+            self.socketControl.startListener(bindAddress=self.bindAddress, nodePort=self.nodePort)
+            self.socketControl.startInitiator(bindAddress=self.bindAddress)
             self.controllerThread = threading.Thread(name="brNetworkController", target=self.__networkController__, args=[])
             self.routerThread = threading.Thread(name="brNodeNetworkRouter", target=self.__router__, args=[])
             self.routerThread.start()
             self.controllerThread.start()
             
     def shutdownServer(self):
+        removeUPNP(self.nodePort, "TCP")
         self.shutdown = True
         self.socketControl.shutdown = True
         logger.info("Sent shutdown signal - Node Main Thread is now waiting...")
@@ -212,7 +221,7 @@ class brNodeServer:
                     elif job.requesttype is brControllerRequest.requestType.COMPLETE_BASIC_HANDSHAKE:
                         route = job.routeInfo
                         route.externalNode.finishedUnencryptedHandshake = True
-                        job.completeRequest()
+                        job.completeRequest(brPacket().createSimpleReady())
                 #if job.mostRecentPacket is not None:
                 #    if job.mostRecentPacket.messageType is brPacket.brMessageType.INTRODUCE and job.externalNode.finishedUnencryptedHandshake is False:
                 #        job.outbox.put(brPacket().createSimpleReady())
@@ -300,11 +309,6 @@ class brNodeServer:
  
     def __networkController__(self):
         logger.info("Network controller thread started.")
-        
-        # Get useful network info
-        hostname = socket.gethostname()
-        usIP = socket.gethostbyname(hostname)
-        logger.info(f'Controller reports IP address is: {usIP}')
 
         # Quickly see if we have saved ourselves a UUID + add stuff to DHT
         if not self.secureEnclave.isEncKey("selfUUID"):
@@ -314,8 +318,11 @@ class brNodeServer:
         else:
             self.uuid = self.secureEnclave.returnData("selfUUID")
         
-        self.dht.setRequest(f'{self.uuid}_pubkey', self.secureEnclave.assignedIdentity.publicKey.save_pkcs1())
-        self.dht.setRequest(f'{self.uuid}_nodeport', self.nodePort)
+        if self.dht.hasBootStrapped:
+            self.dht.setRequest(f'{self.uuid}_pubkey', self.secureEnclave.assignedIdentity.publicKey.save_pkcs1())
+            self.dht.setRequest(f'{self.uuid}_nodeport', self.nodePort)
+        else:
+            logger.error("DHT is not bootstrapped yet. Cannot publish our public key or node port yet.")
         
         # Rebuild and startup procedure
         # 

@@ -3,6 +3,7 @@ import time
 import uuid
 
 import requests
+from dataclasses import dataclass, field
 
 from .brRoute import brRoute
 from . import brNodeCoreLog
@@ -10,33 +11,31 @@ logger = brNodeCoreLog
 
 from brCore.brEnclave.Identity import Identity
 
+@dataclass
 class brNode:
 
-    def __init__(self):
-        # Node details
-        self.nodeIP:str = None
-        self.nodePort:int = 443
-        self.webPort:int = 80
-        self.dhtport:int = None
-        
-        # State
-        self.lastLatency = 0
-        self.connected = False
-        self.finishedUnencryptedHandshake = False
-        self.finishedHandshake = False
+    # Node details
+    nodeIP: str
+    nodePort: int = 13337
+    webPort: int = 11000
+    dhtport: int = 23338
+    
+    # State
+    lastLatency: int = 0
+    connected: bool = False
+    finishedUnencryptedHandshake: bool = False
+    finishedHandshake: bool = False
 
-        # Identity
-        self.identity:Identity = None
-        self.localNodeID = uuid.uuid4()
-        self.friendlyName = "Unknown"
+    # Identity
+    identity: Identity = None
+    localNodeID: uuid.UUID = field(default_factory=uuid.uuid4)
+    friendlyName: str = "Unknown"
 
-        # For controller
-        self.firstSeen = time.time()
-        self.lastSeen = 0
-        self.recordThreadLock = threading.Lock()
-        self.participatingInRoutes:list[brRoute] = []
+    # For controller
+    firstSeen: float = field(default_factory=time.time)
+    lastSeen: float = 0
+    recordThreadLock: threading.Lock = field(default_factory=threading.Lock)
 
-        logger.info(f'New node record ID: {self.localNodeID}')
 
     def queryPubKey(self):
         if self.nodeIP:
@@ -59,10 +58,6 @@ class brNode:
         else:
             logger.error("IP of node not set. Cannot get pubkey. (Check the code)")
             return False
-        
-    def setNodeAddress(self, addressTupl:tuple):
-        self.nodeIP = addressTupl[0]
-        self.nodePort = addressTupl[1]
 
     def setNodeDisconnectedState(self):
         with self.recordThreadLock:

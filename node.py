@@ -82,9 +82,6 @@ class brNode:
         
         self.testing = brCoreSettings.getBoolSetting("production", "testing")
 
-            
-        
-
     def startEnclave(self, enclaveName:str="000_default"):
         if enclaveName is None:
             self.mainEnclave = Enclave(enclaveName, pathtouse=self.temppath)
@@ -92,7 +89,7 @@ class brNode:
             self.mainEnclave = Enclave(brCoreSettings.getStrSetting('enclave','enclave-name'), pathtouse=self.temppath)
         self.enclaveDHTStorage = EnclaveStorage(self.mainEnclave)
         
-    def startWebServer(self, bindAddress:str="127.0.0.1", port:int=11000, debug:bool=False):
+    def startWebServer(self, bindAddress:str="0.0.0.0", port:int=11000, debug:bool=False):
         self.webServer = brWebCore.brWebServer(bindAddress=bindAddress, httpPort=port, debug=debug)
         self.brWebUI = brWebElements.brWebUIModule(self.mainEnclave)
         self.webServer.buildRoute(brWebCore.brWebServer.route.GET_ROUTE, "/", self.brWebUI.brUIRoot)
@@ -130,7 +127,7 @@ class brNode:
             self.mainDHT.setBootstrapList(self.mainEnclave.returnData("dhtbootstrap"))
         self.mainDHT.asyncThread.start()
         
-    def startNodeServer(self, brNodeBindAddress:str="127.0.0.1", brNodePort:int=13337, debug:bool=False):
+    def startNodeServer(self, brNodeBindAddress:str="0.0.0.0", brNodePort:int=13337, debug:bool=False):
         self.nodeServer = brNodeNetworkCore.brNodeServer(self.mainEnclave, self.mainDHT, brNodeBindAddress, brNodePort, self.webServer.httpPort, debug)
         self.nodeServer.startServer()
         logging.info(f"Node name: {self.friendlyName}")

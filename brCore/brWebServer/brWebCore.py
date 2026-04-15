@@ -8,6 +8,7 @@ import os
 from chardet.universaldetector import UniversalDetector
 import mimetypes
 from . import brWebLog
+from ..upnphelper import configureUPNP, removeUPNP
 
 logger = brWebLog
 
@@ -349,6 +350,7 @@ class brWebServer:
         self.bindAddress = bindAddress
         self.httpPort = httpPort
         self.securePort = securePort
+        self.externalIP = None
         # ------------
 
         # If we do want to serve actual files, we need a web Root
@@ -391,7 +393,7 @@ class brWebServer:
 
         if debug:
             logger.level = logging.DEBUG
-
+    
     def buildRoute(self, routeType:str, virtualPath:str, virtualResponder:object|None=None, physicalPath:str=""):
 
         if routeType == brWebServer.route.GET_ROUTE:
@@ -426,12 +428,18 @@ class brWebServer:
                 raise brWebServer.brDuplicateRoute(virtualPath + " " + routeType)
 
     def startServer(self):
+        result = configureUPNP(self.httpPort, "TCP", "Backrooms-net Web Dashboard")
+        if result is not False:
+            self.externalIP = result
+            logger.info("UPNP configured for Web Server.")
+        
         logger.info("Started server.")
         if not self.running:
             self.mainThread = threading.Thread(name="brWebCoreMain", target=self.__mainLoop__, args=[])
             self.mainThread.start()
 
     def shutdownServer(self):
+        removeUPNP(self.httpPort, "TCP")
         self.shutdown = True
         logger.info("Sent shutdown signal - Main Thread is now waiting...")
         self.mainThread.join()

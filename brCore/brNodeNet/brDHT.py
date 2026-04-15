@@ -1,6 +1,7 @@
 import re
 import asyncio
 from queue import Queue
+import socket
 import time
 from kademlia.network import Server
 from threading import Thread
@@ -8,6 +9,7 @@ import logging
 
 from brCore.brEnclave import Enclave
 from . import loggingfactory
+from ..upnphelper import configureUPNP, removeUPNP
 
 log = loggingfactory.getDefaultLogger()
 
@@ -50,6 +52,7 @@ class brDHT:
         self.dhtThread = None
         self.outbox = Queue(maxsize=2500)
         self.requestbox = Queue(maxsize=2500)
+        self.hasBootStrapped = False
         self.requestresults = {}
         
         # Async specific stuff
@@ -68,10 +71,12 @@ class brDHT:
         else:
             log.info("Boot strapping DHT server...")
             self.asyncloop.run_until_complete(self.dhtServer.bootstrap(self.bootstraplist))
+            self.hasBootStrapped = True
     
     def setBootstrapList(self, bootstraplist):
         log.info(f"Boot strapping DHT server with: {bootstraplist}")
         self.asyncloop.run_until_complete(self.dhtServer.bootstrap(bootstraplist))
+        self.hasBootStrapped = True
     
     async def getRequest(self, key):
         result = await self.dhtServer.get(key)
@@ -84,7 +89,6 @@ class brDHT:
         self.shutdown = True
         self.asyncloop.stop()
         return self.dhtServer.bootstrappable_neighbors()
- 
     
     async def request_loop(self):
         log.info("Request processor for DHT has opened.")
@@ -103,8 +107,11 @@ class brDHT:
         log.info("Request processor is exiting due to shutdown signal.")
 
     def __runnerThread__(self):
+        if configureUPNP(self.serverport, "UDP", "Backrooms-net DHT Server") is not False:
+            logging.info("UPNP configured for DHT.")
         self.asyncloop.run_forever()
         log.info("DHT Server Async Thread got shutdown signal.")
+        removeUPNP(self.serverport, "UDP")
         
     def returnDHTLongID(self):
         return self.dhtServer.node.long_id

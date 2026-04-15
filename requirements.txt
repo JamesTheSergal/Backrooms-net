@@ -4,3 +4,5 @@ Requests==2.32.3
 rsa==4.9
 kademlia==2.2.3
 names-generator==0.2.0
+miniupnpc==2.3.3
+py-natpmp==0.2.5
