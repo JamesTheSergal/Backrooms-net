@@ -105,3 +105,20 @@ class brRoute:
                 'timeToLive': self.timeToLive,
                 'routeState': self.routeState}
         return (key, data)
+    
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        # Exclude assignedConn to prevent pickling the socket
+        state.pop('assignedConn', None)
+        state.pop('news', None)
+        state.pop('inbox', None)
+        state.pop('outbox', None)
+        return state
+    
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        # Set assignedConn to None after unpickling (connection must be re-established)
+        self.assignedConn = None
+        self.news = Queue(maxsize=1000)
+        self.inbox = Queue(maxsize=1000)
+        self.outbox = Queue(maxsize=1000)
