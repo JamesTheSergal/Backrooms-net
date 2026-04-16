@@ -9,19 +9,10 @@ from brCore import logLevel
 from brCore import BR_VERSION
 from brCore import Enclave, EnclaveStorage
 from names_generator import generate_name
+from brCore.stats import statHandler
 
 
-def publishWebServerStats(mainEnclave:Enclave, webServer: brWebCore.brWebServer):
-    mainEnclave.updateEntry("brWebCore_errors", webServer.errors)
-    mainEnclave.updateEntry("brWebCore_incomingBytes", webServer.handledIncomingBytes)
-    mainEnclave.updateEntry("brWebCore_outgoingBytes", webServer.handledOutgoingBytes)
-    mainEnclave.updateEntry("brWebCore_requests", webServer.respondedToRequests)
-    mainEnclave.updateEntry("brWebCore_connections", len(webServer.connections))
 
-def publishNodeServerStats(mainEnclave:Enclave, nodeServer: brNodeNetworkCore.brNodeServer):
-    mainEnclave.updateEntry("brNodeNetwork_incomingBytes", nodeServer.socketControl.handledIncomingBytes)
-    mainEnclave.updateEntry("brNodeNetwork_outgoingBytes", nodeServer.socketControl.handledOutgoingBytes)
-    mainEnclave.updateEntry("brNodeNetwork_requests", nodeServer.socketControl.respondedToRequests)
 
 class brNode:
     
@@ -133,11 +124,12 @@ class brNode:
         logging.info(f"Node name: {self.friendlyName}")
         
     def serverLoop(self):
+        stats = statHandler(self.mainEnclave, self.webServer, self.nodeServer)
         try:
             while True:
+                stats.runUpdates()
                 time.sleep(5)
-                publishWebServerStats(self.mainEnclave, self.webServer)
-                publishNodeServerStats(self.mainEnclave, self.nodeServer)
+  
         except KeyboardInterrupt:
             logging.info("Got keyboard inturrupt.")
             futureBootStrap = self.mainDHT.shutdownServer()
