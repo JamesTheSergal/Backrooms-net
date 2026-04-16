@@ -280,3 +280,24 @@ class Enclave:
                 del self.__reverseHash[data_hash]
 
 # NOTE: Todo: Implement encryptedHash usage (e.g., hash encrypted chunks and check before decrypt). Also, consider adding deleteEntry method.
+
+    # Specific tools
+    
+    # This method is probably pretty expensive in terms of performance.
+    def appendOntoList(self, key, obj):
+        if self.isEncKey(key):
+            existing_arr:list = self.returnData(key)
+            existing_arr.append(obj)
+            self.updateEntry(key, existing_arr)
+        else:
+            self.insertData(key, [obj])
+    
+    def removeFrromList(self, key, obj):
+        if self.isEncKey(key):
+            existing_arr:list = self.returnData(key)
+            existing_arr.pop(obj)
+            self.updateEntry(key, existing_arr)
+        else:
+            raise self.enclaveValueDoesNotExist(key)
+            
+            
