@@ -12,11 +12,11 @@ import uuid
 import requests
 from ..upnphelper import configureUPNP, removeUPNP
 from . import brNodeCoreLog
+from .controllerRequest import brControllerRequest
 from brCore.brSockets.brPacket import brPacket
 from brCore.brEnclave.Enclave import Enclave
 from .brNode import brNode
 from ..brSockets.brNetwork import brNetwork
-from ..brSockets.brHandshake import brHandshake, brControllerRequest
 from .brRoute import brRoute
 from .brDHT import brDHT
 from ..brSockets.netconnection import netconnection
@@ -100,7 +100,7 @@ class brNodeServer:
 
         # Network controller specific
         self.uuid = None
-        self.knownNodes:dict[str][brNode] = {} # Key is IP address
+        self.knownNodes:list[brNode] = [] # Key is IP address
         # Controller Notes
         # Keys in Enclave:
         # knownNodes
@@ -172,10 +172,6 @@ class brNodeServer:
         allroutes = []
         nodelist:list[brNode] = self.secureEnclave.returnData("knownNodes")
         for node in nodelist:
-
-            # Since pickle cannot store thread locks, we must be careful and re-populate this
-            node.recordThreadLock = threading.Lock()
-
             pendingRoute = brRoute(routeType=brRoute.brRouteType.TEST,externalNode=node, connectionType=brRoute.brConnectionDirection.INITIATED)
             allroutes.append(pendingRoute)
         return allroutes
@@ -193,34 +189,18 @@ class brNodeServer:
         while self.shutdown is False:
 
             try:
-                job:brRoute = self.socketControl.toRouter.get(block=True, timeout=0.15)
+                job:brControllerRequest = self.socketControl.toRouter.get(block=True, timeout=0.15)
             except Empty:
                 # This is to be expected a lot
                 job = None
                 time.sleep(0.25)
 
             if job is not None:
-                if type(job) is brControllerRequest:
-                    job:brControllerRequest
+                match job.controllerRequestType:
                     
-                    if job.requesttype is brControllerRequest.requestType.REQUEST_CONFIG_DICT:
-                        config = {'uuid': self.uuid, 'dhtport': self.dht.dhtServer.node.port, 'webport': self.webPort}
-                        configMessage = brPacket().setMessageType(brPacket.brMessageType.NODE_INFO)
-                        configMessage.insertObject(config)
-                        job.completeRequest(configMessage.buildPacket())
-                    elif job.requesttype is brControllerRequest.requestType.PARSE_RECEIVED_CONFIG:
-                        route:brRoute = job.routeInfo
-                        packet:brPacket = job.data
-                        externalConfig:dict = packet.rebuildObject()
-                        
-                        route.externalNode.localNodeID = externalConfig['uuid']
-                        route.externalNode.dhtport = externalConfig['dhtport']
-                        route.externalNode.webPort = externalConfig['webport']
-                        job.completeRequest(brPacket().createSimpleReady())
-                    elif job.requesttype is brControllerRequest.requestType.COMPLETE_BASIC_HANDSHAKE:
-                        route = job.routeInfo
-                        route.externalNode.finishedUnencryptedHandshake = True
-                        job.completeRequest(brPacket().createSimpleReady())
+                    case brControllerRequest.requestType.SUBMIT_KNOWN_NODE:
+                        logger.info(f"Added {job.node.localNodeID} to the known nodes list")
+                        self.knownNodes.append(job.node)
                 #if job.mostRecentPacket is not None:
                 #    if job.mostRecentPacket.messageType is brPacket.brMessageType.INTRODUCE and job.externalNode.finishedUnencryptedHandshake is False:
                 #        job.outbox.put(brPacket().createSimpleReady())
