@@ -17,7 +17,7 @@ class brNode:
     nodeIP: str
     nodePort: int = 13337
     webPort: int = 11000
-    dhtport: int = 23338
+    dhtport: int = 0
     
     # State
     lastLatency: int = 0
@@ -60,9 +60,6 @@ class brNode:
     def setNodeDisconnectedState(self):
         self.lastLatency = 0
         self.connected = False
-        self.participatingInRoutes.clear()
-
-
         return self
     
     def setNodeUUID(self, newuuid):

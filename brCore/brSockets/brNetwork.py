@@ -6,9 +6,10 @@ from . import brAgentLog
 from ..brNodeNet.brNode import brNode
 from ..brNodeNet.brRoute import brRoute
 from ..brSockets.brPacket import brPacket
+from ..brNodeNet.controllerRequest import brControllerRequest
 from ..brSockets.netconnection import netconnection
 from ..brEnclave.Enclave import Enclave
-from .brHandshake import brHandshake, brControllerRequest, brBasicHandshake
+from .brHandshake import brBasicHandshake
 
 logger = brAgentLog
 
@@ -24,7 +25,6 @@ class brNetwork:
         self.listenerThreads:list[threading.Thread] = []
         self.initiatorThreads:list[threading.Thread] = []
         self.trafficThreads:list[threading.Thread] = []
-        self.statsupdaterThread = threading.Thread(name="brNetwork-Stats-updater", target=self.statsupdater, args=[])
         
         # Locks
         self.controllerLock = threading.Lock()
@@ -42,8 +42,6 @@ class brNetwork:
         # For external controller
         self.toRouter = Queue(maxsize=25000)
         self.connectRequest = Queue(maxsize=25000)
-        
-        self.statsupdaterThread.start()
         
     def startListener(self, bindAddress:str="127.0.0.1", nodePort:int=13337):
         logger.info(f"Starting node connection listener on: {bindAddress}:{nodePort}")
@@ -173,31 +171,6 @@ class brNetwork:
         #            self.outboundNodeThreads.remove(thr)
                 
         #logger.info("All threads closed. Exiting main loop.")
-    
-    def statsupdater(self):
-        
-        logger.info("Started network stat updater thread...")
-        
-        while self.shutdown is False:
-            
-            incomingBytes = 0
-            outgoingBytes = 0
-            requests = 0
-            
-            
-            for connection in self.trackedConnections:
-                time.sleep(0.05)
-                incomingBytes += connection.bytesin
-                outgoingBytes += connection.bytesout
-                requests += connection.totalrequests
-            
-            self.handledIncomingBytes = incomingBytes
-            self.handledOutgoingBytes = outgoingBytes
-            self.respondedToRequests = requests
-            
-            time.sleep(1)
-            
-        logger.info("Stat updater thread exiting...")
                 
     def __connectionThread__(self, nodeRoute:brRoute):
 
@@ -247,6 +220,10 @@ class brNetwork:
                     nodeRoute.setRouteStateIdle()
                     time.sleep(1)
                     con.sendPing()
+                    with self.statsLock:
+                        self.respondedToRequests += con.requeststatupdate()
+                        self.handledIncomingBytes += con.instatupdate()
+                        self.handledOutgoingBytes += con.outstatupdate()
             
             
             #if reply == False:

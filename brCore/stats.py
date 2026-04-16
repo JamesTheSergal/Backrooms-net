@@ -34,4 +34,5 @@ class statHandler:
             count = len(routelist)
             self.enc.updateEntry("routeCount", count)
         except Enclave.enclaveValueDoesNotExist:
-            pass
+            self.enc.updateEntry("routeCount", 0)
+            

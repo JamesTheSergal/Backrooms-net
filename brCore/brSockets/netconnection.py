@@ -15,6 +15,24 @@ class netconnection:
     bytesin: int = 0
     bytesout: int = 0
     lastpacket: brPacket = None
+    lastrequests: int = 0
+    lastbytesin: int = 0
+    lastbytesout: int = 0
+    
+    def requeststatupdate(self):
+        difference = self.totalrequests - self.lastrequests
+        self.lastrequests = self.totalrequests
+        return difference
+    
+    def instatupdate(self):
+        difference = self.bytesin - self.lastbytesin
+        self.lastbytesin = self.bytesin
+        return difference
+    
+    def outstatupdate(self):
+        difference = self.bytesout - self.lastbytesout
+        self.lastbytesout = self.bytesout
+        return difference
     
     def receivePacket(self) -> brPacket:
         raw = self.soc.recv(1500)
