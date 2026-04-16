@@ -75,7 +75,12 @@ class brDHT:
     
     def setBootstrapList(self, bootstraplist):
         log.info(f"Boot strapping DHT server with: {bootstraplist}")
-        self.asyncloop.run_until_complete(self.dhtServer.bootstrap(bootstraplist))
+        
+        async def bootstrap_and_set():
+            await self.dhtServer.bootstrap(bootstraplist)
+            self.hasBootStrapped = True
+        
+        self.asyncloop.call_soon_threadsafe(lambda: self.asyncloop.create_task(bootstrap_and_set()))
         self.hasBootStrapped = True
     
     async def getRequest(self, key):
@@ -93,6 +98,12 @@ class brDHT:
     async def request_loop(self):
         log.info("Request processor for DHT has opened.")
         while self.shutdown == False:
+            if not self.hasBootStrapped:
+                neighbors = self.dhtServer.protocol.router.find_neighbors(self.dhtServer.node)
+                if neighbors:
+                    self.hasBootStrapped = True
+                    log.info("DHT server now has neighbors; marking as bootstrapped.")
+            
             if self.requestbox.qsize() != 0:
                 request = self.requestbox.get()
                 result = await self.dhtServer.get(request)
@@ -104,6 +115,7 @@ class brDHT:
                 log.info(f"DHT: Sent key: {key}")
             else:
                 await asyncio.sleep(1)
+                
         log.info("Request processor is exiting due to shutdown signal.")
 
     def __runnerThread__(self):

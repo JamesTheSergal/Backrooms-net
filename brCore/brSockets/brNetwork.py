@@ -202,13 +202,17 @@ class brNetwork:
     def __connectionThread__(self, nodeRoute:brRoute):
 
         if nodeRoute.connectionType is brRoute.brConnectionDirection.INITIATED:
-            nodeConfig = {"uuid": self.secureEnclave.returnData("selfUUID"), "webport":self.secureEnclave.returnData("webPort")}
-            brBasicHandshake(nodeRoute.assignedConn).initiate(nodeConfig)
+            nodeConfig = {"uuid": self.secureEnclave.returnData("selfUUID"), "webport":self.secureEnclave.returnData("webPort"), "dhtPort":self.secureEnclave.returnData("dhtPort")}
+            brBasicHandshake(nodeRoute.assignedConn).initiate(nodeConfig) # TODO: add connectionreseterror exception
+            nodeRoute.externalPubKeyCheck()
+            self.toRouter.put(brControllerRequest(brControllerRequest.requestType.SUBMIT_KNOWN_NODE, nodeRoute.externalNode))
         else:
-            nodeConfig = brBasicHandshake(nodeRoute.assignedConn)
+            nodeConfig = brBasicHandshake(nodeRoute.assignedConn).receive()
             nodeRoute.externalNode.setNodeUUID(nodeConfig["uuid"])
             nodeRoute.externalNode.webPort = nodeConfig["webport"]
+            nodeRoute.externalNode.dhtport = nodeConfig["dhtPort"]
             nodeRoute.externalPubKeyCheck()
+            self.toRouter.put(brControllerRequest(brControllerRequest.requestType.SUBMIT_KNOWN_NODE, nodeRoute.externalNode))
         
         # START OF CONTINUOUS LOOP
         #

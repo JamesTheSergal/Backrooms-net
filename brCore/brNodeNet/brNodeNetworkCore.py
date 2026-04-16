@@ -318,6 +318,10 @@ class brNodeServer:
         else:
             self.uuid = self.secureEnclave.returnData("selfUUID")
         
+        # Values that need to be updated every startup
+        self.secureEnclave.updateEntry("webPort", self.webPort)
+        self.secureEnclave.updateEntry("dhtPort", self.dht.serverport)
+        
         if self.dht.hasBootStrapped:
             self.dht.setRequest(f'{self.uuid}_pubkey', self.secureEnclave.assignedIdentity.publicKey.save_pkcs1())
             self.dht.setRequest(f'{self.uuid}_nodeport', self.nodePort)
@@ -360,6 +364,14 @@ class brNodeServer:
                 
                 pendingRoute = brRoute(routeType=brRoute.brRouteType.TEST, externalNode=newNodeObject, connectionType=brRoute.brConnectionDirection.INITIATED)
                 self.socketControl.connectRequest.put(pendingRoute)
+                
+            if self.dht.hasBootStrapped is False:
+                bootstraplist = []
+                for node in self.knownNodes:
+                    if node.dhtport != 0:
+                        bootstraplist.append((node.nodeIP,node.dhtport))
+                if len(bootstraplist) > 0:
+                    self.dht.setBootstrapList(bootstraplist)
             
             time.sleep(1)
         
@@ -370,13 +382,10 @@ class brNodeServer:
         
         #TODO: at a later date, make routes restorable
         logger.info("Saving node data - Gathering nodes...")
-        nodeGather = []
-        for nodeIP in self.knownNodes.keys():
-            node:brNode = self.knownNodes[nodeIP]
+        for node in self.knownNodes:
             node.setNodeDisconnectedState()
-            nodeGather.append(node)
-        
-        self.secureEnclave.updateEntry("knownNodes", nodeGather, True)
+  
+        self.secureEnclave.updateEntry("knownNodes", self.knownNodes, True)
             
 
 
