@@ -9,57 +9,42 @@ from ..brSockets.brPacket import brPacket
 from ..brNodeNet.controllerRequest import brControllerRequest
 from ..brSockets.netconnection import netconnection
 from ..brEnclave.Enclave import Enclave
+from ..brNodeNet.events import NetworkEvent, EventType
 from .brHandshake import brBasicHandshake
 
 logger = brAgentLog
 
-class brNetwork:
+class ConnectionManager:
     
-    def __init__(self, secureEnclave:Enclave, debug:bool=False):
+    def __init__(self, secureEnclave:Enclave, event_queue:Queue):
         
         self.shutdown = False
-
         self.secureEnclave = secureEnclave
+        self.event_queue = event_queue
+        self.connect_request_queue = Queue(maxsize=1000)
+        self.trackedConnections = []
     
-        # Threads
-        self.listenerThreads:list[threading.Thread] = []
-        self.initiatorThreads:list[threading.Thread] = []
-        self.trafficThreads:list[threading.Thread] = []
+  
+        self.listenerThreads = []
+        self.initiatorThreads = []
+        self.io_threads = []
         
-        # Locks
-        self.controllerLock = threading.Lock()
         
-        # Tracking
-        self.trackedConnections:list[netconnection] = [] # Key is IP address
-        
-        # Stats
-        self.statsLock = threading.Lock()
-        self.handledIncomingBytes = 0
-        self.handledOutgoingBytes = 0
-        self.respondedToRequests = 0
-        # ------------
-        
-        # For external controller
-        self.toRouter = Queue(maxsize=25000)
-        self.connectRequest = Queue(maxsize=25000)
-        
-    def startListener(self, bindAddress:str="127.0.0.1", nodePort:int=13337):
-        logger.info(f"Starting node connection listener on: {bindAddress}:{nodePort}")
-        newSpawn = threading.Thread(name="brNodeNetworkListener", target=self.connectionListener, args=[bindAddress, nodePort])
+    def startListener(self, bind_address, port):
+        newSpawn = threading.Thread(name="brNodeNetworkListener", target=self.connectionListener, args=[bind_address, port])
         self.listenerThreads.append(newSpawn)
         newSpawn.start()
     
-    def startInitiator(self, bindAddress:str="127.0.0.1"):
-        logger.info(f"Starting node connection initiator on {bindAddress}")
+    def startInitiator(self):
         newSpawn = threading.Thread(name="brNodeNetworkInitiator", target=self.connectionInitiator, args=[])
         self.initiatorThreads.append(newSpawn)
         newSpawn.start()
     
-    def connectionListener(self, bindAddress:str, nodePort:int):
+    def connectionListener(self, bind_address, port):
         
         try:
             soc = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            soc.bind((bindAddress, nodePort))
+            soc.bind((bind_address, port))
             soc.listen(4)
             soc.settimeout(0.5)
 
@@ -87,10 +72,13 @@ class brNetwork:
                                        externalNode=pendingNode, 
                                        connectionType=brRoute.brConnectionDirection.RECEIVED
                 )
-                self.secureEnclave.appendOntoList("nodeRoutes", pendingRoute)
+                self.event_queue.put(NetworkEvent(
+                    EventType.CONNECTION_ESTABLISHED,
+                    route=pendingRoute
+                    ))
 
-                spawnThread = threading.Thread(name=f'brNodeCon-received-({address})',target=self.__connectionThread__, args=[pendingRoute])
-                self.trafficThreads.append(spawnThread)
+                spawnThread = threading.Thread(name=f'brNodeCon-received-({ip})',target=self._connection_io_loop, args=[pendingRoute])
+                self.io_threads.append(spawnThread)
                 spawnThread.start()
             except TimeoutError:
                 # This is normal. It gives us time to loop and check threads.
@@ -123,55 +111,112 @@ class brNetwork:
         while self.shutdown is False:
 
             try:
-                connectjob:brRoute = self.connectRequest.get(block=True, timeout=0.15)
+                # Get a route that we should try to connect to
+                route: brRoute = self.connect_request_queue.get(timeout=0.3)
             except Empty:
-                # This is to be expected a lot
-                connectjob = None
+                continue
 
-            if connectjob is not None:
-                
-                outboundIP = connectjob.externalNode.nodeIP
-                outboundPort = connectjob.externalNode.nodePort
+            if route is None:
+                continue
 
+            self._attempt_outbound_connection(route)
+
+        logger.info("Connection Initiator shutting down.")
+
+    def request_connection(self, route: brRoute):
+        """Public API for the controller to request an outbound connection."""
+        if route.connectionType != brRoute.brConnectionDirection.INITIATED:
+            logger.error("Cannot request connection on a RECEIVED route")
+            return
+        self.connect_request_queue.put(route)
+
+    def _attempt_outbound_connection(self, route: brRoute):
+        """Actually performs the socket connection and sets up the I/O thread."""
+        ip = route.externalNode.nodeIP
+        port = route.externalNode.nodePort
+        
+        try:
+            logger.debug(f"Initiating outbound connection to {ip}:{port}")
+            
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.connect((ip, port))
+            
+            route.assignedConn = netconnection(
+                soc=sock,
+                ip=ip,
+                port=port,
+                connected=True,
+                encryptionident=self.secureEnclave.assignedIdentity
+            )
+            
+            # Start the thin I/O thread (same one used by listener)
+            io_thread = threading.Thread(
+                name=f"brNodeCon-outbound-{ip}",
+                target=self._connection_io_loop,
+                args=[route],
+                daemon=True
+            )
+            self.io_threads.append(io_thread)
+            io_thread.start()
+            
+            # Notify the controller that the connection was established
+            self.event_queue.put(NetworkEvent(
+                event_type=EventType.CONNECTION_ESTABLISHED,
+                route=route
+            ))
+            
+            logger.info(f"Successfully connected to {ip}:{port}")
+            
+        except ConnectionRefusedError:
+            logger.warning(f"Connection refused by {ip}:{port}")
+            self.event_queue.put(NetworkEvent(
+                event_type=EventType.CONNECTION_CLOSED,
+                route=route,
+                error=ConnectionRefusedError("Connection refused")
+            ))
+        except Exception as e:
+            logger.exception(f"Failed to connect to {ip}:{port}")
+            self.event_queue.put(NetworkEvent(
+                event_type=EventType.CONNECTION_CLOSED,
+                route=route,
+                error=e
+            ))
+
+    def _connection_io_loop(self, route: brRoute):
+        """Thin I/O thread. Only reads, writes, and posts events."""
+        conn = route.assignedConn
+        try:
+            while not self.shutdown and route.externalNode.connected:
                 try:
-                    obsoc = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                    logger.debug("Attempting to connect to node...")
-                    obsoc.connect((outboundIP, outboundPort))
-                    
-                    connectjob.assignedConn = netconnection(soc=obsoc,
-                                                            ip=outboundIP,
-                                                            port=outboundPort,
-                                                            connected=True,
-                                                            encryptionident=self.secureEnclave.assignedIdentity
-                    )
-                    
-                    spawnThread = threading.Thread(name=f'brNodeCon-outbound-({outboundIP})',target=self.__connectionThread__, args=[connectjob])
-                    self.trafficThreads.append(spawnThread)
-                    spawnThread.start()
-                    logger.debug("Connected.")
-                except ConnectionRefusedError:
-                    # Action to be taken about failure
-                    logger.exception("Cannot connect to node! Connection refused!", exc_info=False)
-                except:
-                    # Fill this in later
-                    logger.exception("Connection error!", exc_info=True)
-            else:
-                time.sleep(0.15)
-    
-        # Broke out of loop. We must be shutting down.
-        logger.info("Node connection initiator received shutdown, refusing new connections.")
-        #logger.info(f'Waiting for {len(self.outboundNodeThreads)} threads to shutdown...')
+                    packet = conn.receivePacket(timeout=0.2)
+                    if packet:
+                        self.event_queue.put(NetworkEvent(
+                            EventType.PACKET_RECEIVED, 
+                            route=route, 
+                            packet=packet
+                        ))
+                except Empty:
+                    continue
+                except Exception as e:
+                    self.event_queue.put(NetworkEvent(
+                        EventType.CONNECTION_CLOSED, 
+                        route=route, 
+                        error=e
+                    ))
+                    break
 
-        #while len(self.outboundNodeThreads) > 0:
-        #    logger.info(f'Waiting for {len(self.outboundNodeThreads)} threads to shutdown...')
-        #    for thr in self.outboundNodeThreads:
-        #        thr.join(timeout=5.0)
-        #        if not thr.is_alive():
-        #            logger.info(f'Thread {thr.native_id} shutdown...')
-        #            self.outboundNodeThreads.remove(thr)
-                
-        #logger.info("All threads closed. Exiting main loop.")
-                
+                # Send anything in the outbox (non-blocking)
+                while not route.outbox.empty():
+                    try:
+                        data = route.outbox.get_nowait()
+                        conn.sendall(data)
+                    except:
+                        break
+
+        finally:
+            self.event_queue.put(NetworkEvent(EventType.CONNECTION_CLOSED, route=route))
+    
+    
     def __connectionThread__(self, nodeRoute:brRoute):
 
         if nodeRoute.connectionType is brRoute.brConnectionDirection.INITIATED:

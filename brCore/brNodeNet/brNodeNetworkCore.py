@@ -16,10 +16,14 @@ from .controllerRequest import brControllerRequest
 from brCore.brSockets.brPacket import brPacket
 from brCore.brEnclave.Enclave import Enclave
 from .brNode import brNode
-from ..brSockets.brNetwork import brNetwork
+from ..brSockets.brNetwork import ConnectionManager
 from .brRoute import brRoute
+from ..brSockets.brHandshake import brBasicHandshake
+from .router import Router
+from .events import EventType, NetworkEvent
 from .brDHT import brDHT
 from ..brSockets.netconnection import netconnection
+from queue import Queue
 
 BR_VERSION = "0.0.1-alpha"
 
@@ -31,117 +35,102 @@ class brNodeServer:
         """Exception base class for the brWebServer."""
         pass
 
-    def __init__(self, secureEnclave:Enclave, dhtServer:brDHT, bindAddress:str="127.0.0.1", nodePort:int=13337, webPort:int=11000, debug=False) -> None:
-
-        # If debug is set, we will log at the lowest level + debug timings
-        self.debug = debug
-        # ------------
-
-        # Network setup
-        self.bindAddress = bindAddress
-        self.nodePort:int = nodePort
-        self.webPort:int = webPort
-        self.externalIP: int = None
-        # ------------
-
-        # Secure Enclave for peer stats
-        self.secureEnclave = secureEnclave
-        # ------------
+    def __init__(self, secureEnclave:Enclave, dhtServer:brDHT) -> None:
         
-        # DHT
+        self.node_port = random.randrange(13000, 14000) # For testing
+
+        self.secureEnclave = secureEnclave
         self.dht = dhtServer
-        #
-
-        # Connection Pool
-        # Will be replaced
-        # ------------
-
+        self.event_queue = Queue(maxsize=10000)
+        self.connection_manager = ConnectionManager(secureEnclave, self.event_queue)
+        
+        self.knownNodes:list[brNode] = []
+        self.routes = []
+        self.router = Router(self.secureEnclave, self.dht, self.event_queue)
+        
+        self.shutdown = False
+        self.controller_thread = None
+        
         # Network controller specific
         self.uuid = None
-        self.knownNodes:list[brNode] = [] # Key is IP address
-        # Controller Notes
-        # Keys in Enclave:
-        # knownNodes
-        # ------------
-
-        # Threads
-        self.thrLock = threading.Lock()
-        self.controllerThread:threading.Thread = None
-        # ------------
-
-        # Server state flags
-        self.running = False
-        self.shutdown = False
-        # ------------
-        
-
-        # Socket Control Module
-        self.socketControl = brNetwork(self.secureEnclave)
- 
 
     def startServer(self):
-        result = configureUPNP(self.nodePort, "TCP", "Backrooms-net Node")
-        if result is not False:
-            self.externalIP = result
-            logger.info("UPNP configured for Node Server.")
+        #result = configureUPNP(self.nodePort, "TCP", "Backrooms-net Node")
+        #if result is not False:
+        #    self.externalIP = result
+        #    logger.info("UPNP configured for Node Server.")
             
-        logger.info("Started node server.")
-        if not self.running:
-            self.socketControl.startListener(bindAddress=self.bindAddress, nodePort=self.nodePort)
-            self.socketControl.startInitiator(bindAddress=self.bindAddress)
-            self.controllerThread = threading.Thread(name="brNetworkController", target=self.__networkController__, args=[])
-            self.routerThread = threading.Thread(name="brNodeNetworkRouter", target=self.__router__, args=[])
-            self.routerThread.start()
-            self.controllerThread.start()
+        
+        self.connection_manager.startListener("0.0.0.0", self.node_port)
+        self.connection_manager.startInitiator()
+        self.controllerThread = threading.Thread(name="brNetworkController", target=self._controller_loop, args=[])
+        self.controllerThread.start()
+        logger.info(f"Started node server on port {self.node_port}")
             
     def shutdownServer(self):
-        removeUPNP(self.nodePort, "TCP")
+        #removeUPNP(self.nodePort, "TCP")
         self.shutdown = True
         self.socketControl.shutdown = True
         logger.info("Sent shutdown signal - Node Main Thread is now waiting...")
         # Fix this later
-    
-    def generateRoutesFromSeedFile(self, filepath:str='seedservers.txt') -> list[brRoute]:
-        allroutes = []
-        with open('seedservers.txt') as file:
-            for line in file:
-                linesplit = line.split(":")
-                if len(linesplit) == 3:
-                    ip = linesplit[0]
-                    port = int(linesplit[1])
-                    webport = int(linesplit[2])
-                else:
-                    ip = line
-                    port = 80
-                    webport = 443
-                try:
-                    socket.inet_aton(ip) # Will fail if it isn't a proper IP address
-                    newNodeObject = brNode(nodeIP=ip, nodePort=port, webPort=webport)
-                    if newNodeObject.queryPubKey():  # TODO: Add check - and ip != usIP
-                        pendingRoute = brRoute(routeType=brRoute.brRouteType.TEST, externalNode=newNodeObject, connectionType=brRoute.brConnectionDirection.INITIATED)
-                        allroutes.append(pendingRoute)
-                    else:
-                        logger.error(f'Seed server {ip} did not respond correctly when we asked for their public key. (Security Issue?)')
-                except:
-                    logger.error(f'A line in the seedservers list is not a valid IP address or seed server. -> {line}')
-        return allroutes
-    
-    def generateRoutesFromEnclaveSave(self)-> list[brRoute]:
-        allroutes = []
-        nodelist:list[brNode] = self.secureEnclave.returnData("knownNodes")
-        for node in nodelist:
-            pendingRoute = brRoute(routeType=brRoute.brRouteType.TEST,externalNode=node, connectionType=brRoute.brConnectionDirection.INITIATED)
-            allroutes.append(pendingRoute)
-        return allroutes
         
+    def _controller_loop(self):
+        logger.info("Network controller started")
+        self._perform_initial_bootstrapping()
+        
+        while not self.shutdown:
+            try:
+                event: NetworkEvent = self.event_queue.get(timeout=0.3)
+                self._handle_event(event)
+            except Empty:
+                self._do_periodic_maintenance()
+                continue
     
-    def __debugToFile__(data: bytes, id, count):
-        tempdir = Path(f'temp/{id}')
-        if not tempdir.is_dir():
-            os.mkdir(f'temp/{id}')
-        with open(f'temp/{id}/{str(count)}.packet', 'ab') as df:
-            df.write(data)
-        logger.debug(f'Wrote packet to: temp/{id}/{str(count)}.packet')
+    def _handle_event(self, event: NetworkEvent):
+        if event.event_type == EventType.CONNECTION_ESTABLISHED:
+            self._handle_new_connection(event.route)
+        elif event.event_type == EventType.PACKET_RECEIVED:
+            self.router.handle_packet(event.route, event.packet)
+        elif event.event_type == EventType.CONNECTION_CLOSED:
+            self._handle_disconnect(event.route)
+        elif event.event_type == EventType.SUBMIT_KNOWN_NODE:
+            self.known_nodes.append(event.node)
+    
+    def _perform_initial_bootstrapping(self):
+        try:
+            nodelist:list[brNode] = self.secureEnclave.returnData("knownNodes")
+        except Enclave.enclaveValueDoesNotExist:
+            logger.info("No saved nodes for bootstrap.")
+    
+    def _do_periodic_maintenance(self):
+        pass
+    
+    def _handle_disconnect(self, route: brRoute):
+        pass
+    
+    def _handle_new_connection(self, route: brRoute):
+        # Decide if we need to run handshake
+        if route.connectionType == brRoute.brConnectionDirection.INITIATED:
+            config = {"uuid": self.uuid, "dhtport": self.dht.serverport}
+            brBasicHandshake(route.assignedConn).initiate(config)
+        else:
+            config = brBasicHandshake(route.assignedConn).receive()
+            route.externalNode.setNodeUUID(config["uuid"])
+            route.externalNode.dhtport = config["dhtport"]
+        # else the receiver side already did it via the handshake class
+        self.routes.append(route)
+        self.event_queue.put(NetworkEvent(EventType.HANDSHAKE_COMPLETE, route=route))
+        
+    def connect_to_node(self, ip: str, port: int):
+        node = brNode(nodeIP=ip, nodePort=port)
+        route = brRoute(
+            routeType=brRoute.brRouteType.TEST,
+            externalNode=node,
+            connectionType=brRoute.brConnectionDirection.INITIATED
+        )
+        
+        # Put the request into the ConnectionManager's dedicated queue
+        self.connection_manager.connect_request_queue.put(route)
 
     def __router__(self):
         while self.shutdown is False:

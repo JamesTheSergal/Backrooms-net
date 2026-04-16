@@ -3,6 +3,7 @@ from brCore.brWebServer.brWebCore import brWebPage
 from brCore.brEnclave.notrustvars import enclave
 from brCore.loggingfactory import timeProfiler
 from brCore import BR_VERSION
+from brCore.brNodeNet.brNodeNetworkCore import brNodeServer
 import threading
 import uuid
 import urllib.parse  # Add this import for parsing form data
@@ -107,10 +108,12 @@ def genFileForm(postEndpoint, formName, dataName, formButtonText):
 
 class brWebUIModule(brWebPage):
 
-    def __init__(self, secureEnclave: enclave) -> None:
+    def __init__(self, secureEnclave: enclave, node_server:brNodeServer, web_server:brWebServer) -> None:
         brWebPage.__init__(self)
         super().__init__()
         self.secureEnclave = secureEnclave # Threading locks are already implemented in the Enclave
+        self.node_server = node_server
+        self.web_server = web_server
         pass
     
     def insecureAnnounce(self, context: brWebServer.packetParser):
@@ -148,8 +151,8 @@ class brWebUIModule(brWebPage):
             port = int(port_str)
             
             # Store in Enclave
-            self.secureEnclave.updateEntry("connect_ip", ip, create=True)
-            self.secureEnclave.updateEntry("connect_port", port, create=True)
+            
+            self.node_server.connect_to_node(ip, port)
             
             self.addContent(
                 genHeader() +
@@ -227,15 +230,15 @@ class brWebUIModule(brWebPage):
     
     def statsPage(self, context: brWebServer.packetParser):
 
-        webInBytes = self.secureEnclave.returnData("brWebCore_incomingBytes")
-        webOutBytes = self.secureEnclave.returnData("brWebCore_outgoingBytes")
-        webRequests = self.secureEnclave.returnData("brWebCore_requests")
-        webErrors = self.secureEnclave.returnData("brWebCore_errors")
-        webConnections = self.secureEnclave.returnData("brWebCore_connections")
+        webInBytes = self.web_server.handledIncomingBytes
+        webOutBytes = self.web_server.handledOutgoingBytes
+        webRequests = self.web_server.respondedToRequests
+        webErrors = self.web_server.errors
+        webConnections = len(self.web_server.connections)
 
-        nodeInBytes = self.secureEnclave.returnData("brNodeNetwork_incomingBytes")
-        nodeOutBytes = self.secureEnclave.returnData("brNodeNetwork_outgoingBytes")
-        nodeRequests = self.secureEnclave.returnData("brNodeNetwork_requests")
+        nodeInBytes = 0#self.secureEnclave.returnData("brNodeNetwork_incomingBytes")
+        nodeOutBytes = 0#self.secureEnclave.returnData("brNodeNetwork_outgoingBytes")
+        nodeRequests = 0#self.secureEnclave.returnData("brNodeNetwork_requests")
 
         self.addContent(
             genHeader() +
@@ -251,7 +254,8 @@ class brWebUIModule(brWebPage):
                  f'<h4>Node Network stats</h4>'+
                  f'<p>We have handled {humanbytes(nodeInBytes)} In</p>\n' +
                  f'<p>We have handled {humanbytes(nodeOutBytes)} Out</p>\n' +
-                 f'<p>We have handled {nodeRequests} Requests</p>\n'
+                 f'<p>We have handled {nodeRequests} Requests</p>\n' +
+                 f'<p>We are apart of {len(self.node_server.routes)} active routes</p>\n'
             ) +
             genFooter()
         )

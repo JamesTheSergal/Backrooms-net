@@ -93,6 +93,7 @@ class netconnection:
             brPacket: The parsed and validated packet.
         """
         raw = self.soc.recv(1500)
+        self.soc.
         self.bytesin += len(raw)
         self.totalrequests += 1
         self.lastpacket = brPacket(raw)

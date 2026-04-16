@@ -14,7 +14,7 @@ class statHandler:
         time.sleep(1)
         self.publishWebServerStats()
         time.sleep(1)
-        self.publishNodeServerStats()
+        #self.publishNodeServerStats()
     
     def publishWebServerStats(self):
         self.enc.updateEntry("brWebCore_errors", self.webServer.errors)

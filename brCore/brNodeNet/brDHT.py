@@ -3,6 +3,8 @@ import asyncio
 from queue import Queue
 import socket
 import time
+from typing import Optional
+import uuid
 from kademlia.network import Server
 from threading import Thread
 import logging
@@ -10,6 +12,8 @@ import logging
 from brCore.brEnclave import Enclave
 from . import loggingfactory
 from ..upnphelper import configureUPNP, removeUPNP
+
+from ..brNodeNet.events import DHTRequest
 
 log = loggingfactory.getDefaultLogger()
 
@@ -113,28 +117,27 @@ class brDHT:
         self.asyncloop.call_soon_threadsafe(lambda: self.asyncloop.create_task(bootstrap_and_set()))
         self.hasBootStrapped = True
     
-    async def getRequest(self, key):
-        """
-        Asynchronously retrieve a value from the DHT by key.
+    def set(self, key: str, value: any):
+        """Fire-and-forget set. Returns immediately."""
+        request = DHTRequest(key=key, value=value)
+        self.outbox.put(request)                    # Reuse your existing queue
 
-        Args:
-            key: The lookup key.
 
-        Returns:
-            The value if found, else None.
+    def get(self, key: str, request_id: Optional[str] = None) -> Optional[str]:
         """
-        result = await self.dhtServer.get(key)
-        return result
-    
-    def setRequest(self, key, data):       
+        Non-blocking GET.
+        
+        If request_id is provided, the result will come back as a DHT_RESPONSE event
+        with that same request_id. This is the recommended way.
+        
+        Returns the result immediately only if it's already in the local cache.
         """
-        Queue data to be set in the DHT under the given key (async processed).
-
-        Args:
-            key: Storage key.
-            data: Value to store.
-        """
-        self.outbox.put((key, data))
+        if request_id is None:
+            request_id = str(uuid.uuid4())
+            
+        request = DHTRequest(key=key, request_id=request_id)
+        self.requestbox.put(request)                # Reuse your existing queue
+        return None                                 # Caller should listen for event
 
     def shutdownServer(self):
         """
@@ -171,7 +174,7 @@ class brDHT:
                 self.requestresults[request] = result
             
             elif self.outbox.qsize() != 0:
-                key, data = self.outbox.get()
+                request:DHTRequest = self.outbox.get()
                 await self.dhtServer.set(key, data)
                 log.info(f"DHT: Sent key: {key}")
             else:
