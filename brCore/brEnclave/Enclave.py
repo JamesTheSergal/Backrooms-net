@@ -79,7 +79,14 @@ class Enclave:
             return f"{self.message} {self.key}"
     
     def __init__(self, enclaveName, pathtouse:str=None, newIdentity:bool = False) -> None:
-
+        """
+        Initialize the Enclave instance.
+        
+        Args:
+            enclaveName (str): The name of the enclave.
+            pathtouse (str, optional): The directory path to use for storing enclave files. Defaults to 'temp/'.
+            newIdentity (bool, optional): Whether to create a new identity even if the enclave file exists. Defaults to False.
+        """
         self.enclaveName = enclaveName
         
         # Get the logger from the package initilization
@@ -141,8 +148,19 @@ class Enclave:
             self.insertData("PublicKey", self.assignedIdentity.publicKey)
 
     def __verifyDataHash__(self, key=None, hash=None):
-        """Basic implementation to verify data integrity via hash check.
-        # NOTE: This was stubbed; expanded it simply. We can add more (e.g., check encryptedHash) later.
+        """
+        Verify the integrity of data associated with a key or find the key by hash.
+        
+        Args:
+            key (str, optional): The key to verify.
+            hash (str, optional): The hash to find the associated key.
+        
+        Returns:
+            bool or str or None: True if key exists and hash matches, False if key not in hashes,
+                the key if hash found, None otherwise.
+        
+        Raises:
+            enclaveDataIntegrityError: If hash mismatch for the key.
         """
         with self.__threadLock:
             if key is not None:
@@ -160,6 +178,18 @@ class Enclave:
                     return None
 
     def loadEnclaveFile(self, location):
+        """
+        Load the enclave data from the specified file location.
+        
+        Args:
+            location (str): The path to the enclave file.
+        
+        Returns:
+            bool: True if loaded successfully, False if file not found.
+        
+        Raises:
+            enclaveIdentityError: If decryption fails.
+        """
         target_ef = Path(location)
         if target_ef.is_file():
             self.logger.info(f'Enclave -> Loading {location=}')
@@ -201,6 +231,18 @@ class Enclave:
             return False
         
     def saveEnclaveFile(self, overwrite=False):
+        """
+        Save the enclave data to the target file.
+        
+        Args:
+            overwrite (bool, optional): Whether to overwrite existing file. Defaults to False.
+        
+        Returns:
+            bool: True if saved, False if file exists and overwrite is False.
+        
+        Raises:
+            enclaveException: If identity is not locked.
+        """
         if self.target_enclave.is_file() and not overwrite:
             self.logger.error(f'Warning -> Enclave already exists! Cannot overwrite Enclave! {self.target_enclave=}')
             return False
@@ -236,10 +278,33 @@ class Enclave:
         return True
     
     def isEncKey(self, key):
+        """
+        Check if the given key exists in the enclave data.
+        
+        Args:
+            key: The key to check.
+        
+        Returns:
+            bool: True if key exists, False otherwise.
+        """
         with self.__threadLock:
             return key in self.__data.keys()
             
     def updateEntry(self, key, obj, create=True):
+        """
+        Update the value for an existing key or create a new entry if create is True.
+        
+        Args:
+            key: The key to update.
+            obj: The new object to store.
+            create (bool, optional): Whether to create if key doesn't exist. Defaults to True.
+        
+        Returns:
+            bool: True if updated.
+        
+        Raises:
+            enclaveValueDoesNotExist: If key doesn't exist and create is False.
+        """
         if self.isEncKey(key) or create:
             with self.__threadLock:
                 self.__data[key] = obj
@@ -252,6 +317,19 @@ class Enclave:
         return True
             
     def insertData(self, key, obj):
+        """
+        Insert a new key-value pair into the enclave data.
+        
+        Args:
+            key: The key for the data.
+            obj: The object to store.
+        
+        Returns:
+            bool: True if inserted.
+        
+        Raises:
+            enclaveValueExists: If key already exists.
+        """
         if not self.isEncKey(key):
             with self.__threadLock:
                 self.__data[key] = obj
@@ -264,6 +342,18 @@ class Enclave:
             raise Enclave.enclaveValueExists(key)
     
     def returnData(self, key):
+        """
+        Retrieve the data associated with the given key.
+        
+        Args:
+            key: The key to retrieve.
+        
+        Returns:
+            The stored object.
+        
+        Raises:
+            enclaveValueDoesNotExist: If key doesn't exist.
+        """
         if self.isEncKey(key):
             self.__verifyDataHash__(key)  # NOTE: Call verification on read for tamper detection.
             return self.__data[key]
@@ -271,6 +361,15 @@ class Enclave:
             raise Enclave.enclaveValueDoesNotExist(key)
         
     def deleteKey(self, key):
+        """
+        Delete the key-value pair from the enclave data.
+        
+        Args:
+            key: The key to delete.
+        
+        Raises:
+            enclaveValueDoesNotExist: If key doesn't exist.
+        """
         self.logger.warning(f"Enclave delete key was called on key:{key} (Doesn't happen that often)")
         if self.isEncKey(key):
             with self.__threadLock:
@@ -285,6 +384,15 @@ class Enclave:
     
     # This method is probably pretty expensive in terms of performance.
     def appendOntoList(self, key, obj):
+        """
+        Append an object to the list associated with the key.
+        
+        Args:
+            key: The key of the list.
+            obj: The object to append.
+        
+        If the key doesn't exist, creates a new list with the object.
+        """
         if self.isEncKey(key):
             existing_arr:list = self.returnData(key)
             existing_arr.append(obj)
@@ -293,6 +401,16 @@ class Enclave:
             self.insertData(key, [obj])
     
     def removeFrromList(self, key, obj):
+        """
+        Remove an object from the list associated with the key by index.
+        
+        Args:
+            key: The key of the list.
+            obj (int): The index of the object to remove.
+        
+        Raises:
+            enclaveValueDoesNotExist: If key doesn't exist.
+        """
         if self.isEncKey(key):
             existing_arr:list = self.returnData(key)
             existing_arr.pop(obj)

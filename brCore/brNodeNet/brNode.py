@@ -12,8 +12,13 @@ from brCore.brEnclave.Identity import Identity
 
 @dataclass
 class brNode:
+    """
+    A dataclass representing a peer node in the brNode network.
 
-    # Node details
+    Stores node connection details (IP, ports), state (latency, connected,
+    handshake status), identity, friendly name, and timestamps for controller
+    tracking and DHT announcements.
+    """
     nodeIP: str
     nodePort: int = 13337
     webPort: int = 11000
@@ -35,7 +40,21 @@ class brNode:
     #recordThreadLock: threading.Lock = field(default_factory=threading.Lock) # Will be removed later. Pickle can't serialize
 
 
+    
     def queryPubKey(self):
+        """
+        Queries the node's public key by sending an HTTP GET request to
+        http://{nodeIP}:{webPort}/pubkey.
+
+        Imports the response text as the public key into self.identity using
+        Identity.newIdentFromPubImport if the request succeeds.
+
+        Handles ConnectionRefusedError and other exceptions gracefully.
+
+        Returns:
+            bool: True if public key retrieved and imported successfully,
+                False otherwise (no IP, connection issues, non-200 status).
+        """
         if self.nodeIP:
             requestURL = f'http://{self.nodeIP}:{str(self.webPort)}/pubkey'
             logger.info(f"Requesting public key from {requestURL}")
@@ -57,16 +76,53 @@ class brNode:
             logger.error("IP of node not set. Cannot get pubkey. (Check the code)")
             return False
 
+    
     def setNodeDisconnectedState(self):
+        """
+        Sets the node into a disconnected state.
+
+        Resets self.lastLatency to 0 and self.connected to False.
+
+        Returns:
+            self: Allows method chaining.
+        """
         self.lastLatency = 0
         self.connected = False
         return self
     
+    
     def setNodeUUID(self, newuuid):
+        """
+        Changes the local node ID to a new UUID value.
+
+        Args:
+            newuuid (uuid.UUID): The new UUID to assign to self.localNodeID.
+
+        Note:
+            Logs the ID change from old to new.
+        """
         logger.info(f"Changing node id from {self.localNodeID} to {newuuid}")
         self.localNodeID = newuuid
         
+    
     def makeDHTAnnounceDict(self, controllerID):
+        """
+        Creates a key-value pair suitable for announcing this unconfirmed node
+        in the DHT.
+
+        Args:
+            controllerID: Identifier of the controller (str or UUID) announcing
+                        the node.
+
+        Returns:
+            tuple[str, dict]: (key, data)
+                - key: f'{self.localNodeID}_node_unconfirmed_by_{controllerID}'
+                - data: dict with nodeIP, nodePort, webPort, dhtport, friendlyName,
+                        firstSeen, lastSeen.
+
+        Note:
+            Excludes state, identity, and localNodeID from data.
+        """
         key = f'{self.localNodeID}_node_unconfirmed_by_{controllerID}'
         data = {'nodeIP': self.nodeIP,
                 'nodePort': self.nodePort,

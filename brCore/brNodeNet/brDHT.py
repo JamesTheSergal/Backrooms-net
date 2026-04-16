@@ -16,6 +16,11 @@ log = loggingfactory.getDefaultLogger()
 
 # Get a list of IP addresses and ports from bootstrapdht.txt
 def dht_file_read():
+    """Reads the bootstrapdht.txt file and extracts IP addresses and ports.
+
+    Returns:
+        list: A list of tuples containing (IP, port) pairs. Returns empty list on error.
+    """
     pattern = r'(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}):(\d{1,5})'
     filename = "brCore/bootstrapdht.txt"
         
@@ -41,8 +46,28 @@ def dht_file_read():
         return []
     
 class brDHT:
-    
+    """
+    Kademlia DHT server manager for the Backrooms-net.
+
+    Provides thread-safe interfaces for storing and retrieving data in a distributed
+    hash table using enclave-backed storage. Handles bootstrapping, UPNP port mapping,
+    and asynchronous request processing.
+    """
+
     def __init__(self, enclaveStorage, serverport:int, dhtid:int=None):
+        """
+        Initialize and configure the DHT server.
+
+        Sets up asyncio event loop, queues for requests, starts listening,
+        and bootstraps if bootstrap nodes available.
+
+        Note: Caller must start self.asyncThread.
+
+        Args:
+            enclaveStorage: Enclave storage instance.
+            serverport (int): UDP port to bind.
+            dhtid (int, optional): Specific node ID (defaults to random).
+        """
         self.serverport = serverport
         self.dhtServer = None
         self.asyncloop = asyncio.new_event_loop()
@@ -74,6 +99,11 @@ class brDHT:
             self.hasBootStrapped = True
     
     def setBootstrapList(self, bootstraplist):
+        """Sets the bootstrap list for the DHT server and bootstraps asynchronously.
+
+        Args:
+            bootstraplist: List of bootstrap nodes.
+        """
         log.info(f"Boot strapping DHT server with: {bootstraplist}")
         
         async def bootstrap_and_set():
@@ -84,18 +114,49 @@ class brDHT:
         self.hasBootStrapped = True
     
     async def getRequest(self, key):
+        """
+        Asynchronously retrieve a value from the DHT by key.
+
+        Args:
+            key: The lookup key.
+
+        Returns:
+            The value if found, else None.
+        """
         result = await self.dhtServer.get(key)
         return result
     
     def setRequest(self, key, data):       
+        """
+        Queue data to be set in the DHT under the given key (async processed).
+
+        Args:
+            key: Storage key.
+            data: Value to store.
+        """
         self.outbox.put((key, data))
 
     def shutdownServer(self):
+        """
+        Initiate shutdown of the DHT server.
+
+        Sets shutdown flag and stops the event loop.
+
+        Returns:
+            List of known bootstrappable neighbor nodes.
+        """
         self.shutdown = True
         self.asyncloop.stop()
         return self.dhtServer.bootstrappable_neighbors()
     
     async def request_loop(self):
+        """
+        Internal async loop for processing queued DHT operations.
+
+        Processes gets from requestbox (stores in requestresults),
+        sets from outbox, checks bootstrap status periodically.
+        Exits on shutdown.
+        """
         log.info("Request processor for DHT has opened.")
         while self.shutdown == False:
             if not self.hasBootStrapped:
@@ -119,6 +180,12 @@ class brDHT:
         log.info("Request processor is exiting due to shutdown signal.")
 
     def __runnerThread__(self):
+        """
+        Target function for the asyncio thread.
+
+        Configures UPNP, runs the event loop indefinitely,
+        removes UPNP mapping on exit.
+        """
         if configureUPNP(self.serverport, "UDP", "Backrooms-net DHT Server") is not False:
             logging.info("UPNP configured for DHT.")
         self.asyncloop.run_forever()
@@ -126,12 +193,36 @@ class brDHT:
         removeUPNP(self.serverport, "UDP")
         
     def returnDHTLongID(self):
+        """
+        Get the long integer ID of the DHT node.
+
+        Returns:
+            int: The node ID as a long integer.
+        """
         return self.dhtServer.node.long_id
     
     def returnDHTIP(self):
+        """
+        Get the IP address of the DHT node.
+
+        Returns:
+            The node's IP (str or bytes).
+        """
         return self.dhtServer.node.ip
 
 class brDHTQueryHelper:
-    
+    """
+    Utility class for simplified DHT queries.
+
+    Currently under development/placeholder.
+    """
+
     def __init__(self, dhtserver:brDHT, enclave:Enclave):
+        """
+        Initialize the DHT query helper.
+
+        Args:
+            dhtserver (brDHT): The running DHT server instance.
+            enclave (Enclave): Enclave for secure operations.
+        """
         pass

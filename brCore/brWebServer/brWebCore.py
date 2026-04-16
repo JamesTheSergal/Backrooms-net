@@ -14,45 +14,84 @@ logger = brWebLog
 
 
 class brWebServer:
+    """Core HTTP web server implementation for the Backrooms-net project.
+
+    Provides functionality to bind to a port, handle HTTP requests/responses,
+    manage custom routes for GET/POST/etc, serve static files from a web root,
+    and support UPNP port forwarding. Uses threading for concurrent connections.
+    """
 
     class brWebServerException(Exception):
-        """Exception base class for the brWebServer."""
+        """Base exception class for brWebServer related errors."""
+
         pass
 
     class brEncodingConfidenceLow(brWebServerException):
-        """Exception raised when we can't deturmine the encoding of a packet"""
+        """Exception raised when character encoding detection confidence is too low.
+
+        Raised by packetParser when chardet cannot confidently determine the
+        encoding of an incoming HTTP request.
+        """
 
         def __init__(self, reason) -> None:
+            """Initialize the encoding confidence exception.
+
+            Args:
+                reason: The detection result details from UniversalDetector.
+            """
             self.message = "Low confidence in detected charset"
             self.reason = reason
             super().__init__(self.message)
 
         def __str__(self):
+            """Return string representation of the exception."""
             return f"{self.message}: {self.reason}"
 
     class brRouteInvalid(brWebServerException):
-        """Exception raised when a route is invalid"""
+        """Exception raised when a route configuration is invalid.
+
+        This can occur for issues like using a directory as a file path,
+        conflicting physical/virtual paths, or paths not starting with '/'.
+        """
 
         def __init__(self, reason) -> None:
+            """Initialize the route invalid exception.
+
+            Args:
+                reason: Description of why the route is invalid.
+            """
             self.message = "Web Server route is invalid"
             self.reason = reason
             super().__init__(self.message)
 
         def __str__(self):
+            """Return string representation of the exception."""
             return f"{self.message}: {self.reason}"
     
     class brDuplicateRoute(brWebServerException):
-        """Exception raised when there is a duplicate route"""
+        """Exception raised when attempting to register a duplicate route."""
 
         def __init__(self, virtualPath) -> None:
+            """Initialize the duplicate route exception.
+
+            Args:
+                virtualPath: The path that was duplicated.
+            """
             self.message = "Web Server route is invalid"
             self.virtualpath = virtualPath
             super().__init__(self.message)
 
         def __str__(self):
+            """Return string representation of the exception."""
             return f"{self.message}: {self.virtualpath}"
         
     class requestResponse:
+        """HTTP response packet builder.
+
+        Constructs properly formatted HTTP/1.1 response packets with headers
+        and body. Supports different status codes and connection behaviors.
+        Includes server type spoofing capabilities.
+        """
 
         # Constants for replies
         WEB_OK = "HTTP/1.1 200 OK"
@@ -73,6 +112,14 @@ class brWebServer:
         }
         
         def __init__(self, data:bytes, serverStatus: str, connectionType: str, serverType:str=spoofServerTypes["default"]) -> None:
+            """Initialize a new HTTP response.
+
+            Args:
+                data: Response body as bytes.
+                serverStatus: Full status line (e.g. HTTP/1.1 200 OK).
+                connectionType: Connection header value ('keep-alive' or 'close').
+                serverType: Server header value for fingerprint spoofing.
+            """
             self.serverStatus = serverStatus
             self.contentLength = 0
             self.serverType = serverType
@@ -81,10 +128,25 @@ class brWebServer:
             self.databody = data
             
         def setBodySize(self):
+            """Calculate and set the Content-Length header from the body.
+
+            Returns:
+                Self for method chaining.
+            """
             self.contentLength = len(self.databody)
             return self
         
         def setContentType(self, path):
+            """Set the Content-Type header by guessing MIME type from path.
+
+            Uses Python's mimetypes module. Defaults to text/html if unknown.
+
+            Args:
+                path: File path or URL path to determine MIME type from.
+
+            Returns:
+                Self for method chaining.
+            """
             mime_type, encoding = mimetypes.guess_type(path)
             if mime_type is None:
                 mime_type = "text/html"
@@ -92,6 +154,13 @@ class brWebServer:
             return self
         
         def buildPacket(self):
+            """Assemble the complete HTTP response packet as bytes.
+
+            Includes status line, headers, and body with proper CRLF separators.
+
+            Returns:
+                bytes: Complete HTTP response ready to send over socket.
+            """
             packet = b''
             packet += bytes(self.serverStatus + "\r\n", 'utf-8')
             packet += bytes(self.serverType + "\r\n", 'utf-8')
@@ -104,9 +173,23 @@ class brWebServer:
             return packet
 
     class packetParser:
+        """Parses raw HTTP request bytes into structured data.
+
+        Uses chardet for encoding detection and splits headers/body.
+        Supports GET, POST, HEAD, OPTIONS. For POST requests, can fetch
+        remaining body data if Content-Length indicates more data is coming.
+        """
 
         def __init__(self, connection: socket.socket, rawpacket: bytes) -> None:
+            """Parse a raw HTTP request packet.
 
+            Args:
+                connection: The client socket (used for additional POST data).
+                rawpacket: Raw bytes received from the client.
+
+            Raises:
+                brEncodingConfidenceLow: If encoding detection confidence < 0.85.
+            """
             self.refConnection = connection
             
             # Bytes here
@@ -212,54 +295,99 @@ class brWebServer:
                 logger.debug("Got empty packet")
 
         def isGet(self):
+            """Check if this was a GET request.
+
+            Returns:
+                bool: True if requestType is GET.
+            """
             if self.requestType == "GET":
                 return True
             else:
                 return False
         
         def isHead(self):
+            """Check if this was a HEAD request.
+
+            Returns:
+                bool: True if requestType is HEAD.
+            """
             if self.requestType == "HEAD":
                 return True
             else:
                 return False
             
         def isPost(self):
+            """Check if this was a POST request.
+
+            Returns:
+                bool: True if requestType is POST.
+            """
             if self.requestType == "POST":
                 return True
             else:
                 return False
         
         def isOptions(self):
+            """Check if this was an OPTIONS request.
+
+            Returns:
+                bool: True if requestType is OPTIONS.
+            """
             if self.requestType == "OPTIONS":
                 return True
             else:
                 return False
             
         def getRequestedHost(self):
+            """Get the Host header value.
+
+            Returns:
+                str|None: The requested host or None if not present.
+            """
             if "Host" in self.headers.keys():
                 return self.headers["Host"]
             else:
                 return None
         
         def getRequestedConnectionType(self):
+            """Get the Connection header value.
+
+            Returns:
+                str|None: The connection type or None if not present.
+            """
             if "Connection" in self.headers.keys():
                 return self.headers["Connection"]
             else:
                 return None
         
         def getUserAgent(self):
+            """Get the User-Agent header value.
+
+            Returns:
+                str|None: The user agent string or None.
+            """
             if "User-Agent" in self.headers.keys():
                 return self.headers["User-Agent"]
             else:
                 return None
             
         def getReferer(self):
+            """Get the Referer header value.
+
+            Returns:
+                str|None: The referer URL or None.
+            """
             if "Referer" in self.headers.keys():
                 return self.headers["Referer"]
             else:
                 return None
 
         def getContentLength(self):
+            """Get the Content-Length header as integer.
+
+            Returns:
+                int|None: Content length or None if header missing.
+            """
             if "Content-Length" in self.headers.keys():
                 content_length = int(self.headers["Content-Length"])
                 return content_length
@@ -267,6 +395,11 @@ class brWebServer:
                 return None
             
         def getRemainderOfPostData(self):
+            """For POST requests, receive any remaining body data.
+
+            Sets socket to non-blocking temporarily to read additional chunks
+            until Content-Length is satisfied. Updates bodyData and totalSize.
+            """
             currentBytes = self.bodyData
             self.refConnection.setblocking(False)
 
@@ -290,6 +423,11 @@ class brWebServer:
                 logger.debug("Post receive finished.")
                 
     class route:
+        """Route definitions and handlers for the web server.
+
+        Contains subclasses for different HTTP methods (GET, POST).
+        Routes map virtual paths to either physical files or callback responders.
+        """
 
         POST_ROUTE = "POST"
         GET_ROUTE = "GET"
@@ -297,8 +435,24 @@ class brWebServer:
         OPTIONS_ROUTE = "OPTIONS"
 
         class getRoute():
+            """Represents a GET (or similar) route.
+
+            Can serve either a static file from physicalPath or call a virtualResponder
+            function that returns a requestResponse object.
+            """
 
             def __init__(self, virtualPath: str, physicalPath:str="", virtualResponder:object|None=None) -> None:
+                """Create a new GET route.
+
+                Args:
+                    virtualPath: URL path starting with '/'.
+                    physicalPath: Optional filesystem path to serve.
+                    virtualResponder: Optional callable that generates dynamic response.
+
+                Raises:
+                    brRouteInvalid: If configuration is invalid (directory as file,
+                                   conflicting path types, or bad virtual path).
+                """
                 self.virtualPath = virtualPath
                 self.physicalPath = physicalPath
                 self.virtualResponder = virtualResponder
@@ -314,18 +468,47 @@ class brWebServer:
                     raise brWebServer.brRouteInvalid(f'Invalid virtual path! {self.virtualPath} <- does not start at root!')
             
             def addContext(self, context: object):
+                """Attach request context to this route before responding.
+
+                Args:
+                    context: The packetParser instance with request details.
+
+                Returns:
+                    Self for method chaining.
+                """
                 self.context = context
                 return self
 
             def respond(self):
+                """Execute the route handler and return response.
+
+                If virtualResponder is set, calls it with context.
+                For physical paths, this is currently a no-op (handled elsewhere?).
+
+                Returns:
+                    requestResponse: The HTTP response object.
+                """
                 if self.virtualResponder is not None:
                     return self.virtualResponder(self.context)
                 else:
                     pass
                 
         class postRoute():
+            """Represents a POST route.
+
+            Unlike GET, POST routes only support virtual responders (callbacks).
+            """
 
             def __init__(self, virtualPath: str, virtualResponder:object) -> None:
+                """Create a new POST route.
+
+                Args:
+                    virtualPath: URL path starting with '/'.
+                    virtualResponder: Callable that processes the POST request.
+
+                Raises:
+                    brRouteInvalid: If virtual path doesn't start with '/'.
+                """
                 self.virtualPath = virtualPath
                 self.virtualResponder = virtualResponder
                 self.context: brWebServer.packetParser = None
@@ -334,14 +517,35 @@ class brWebServer:
                     raise brWebServer.brRouteInvalid(f'Invalid virtual path! {self.virtualPath} <- does not start at root!')
             
             def addContext(self, context: object):
+                """Attach request context to this route before responding.
+
+                Args:
+                    context: The packetParser instance.
+
+                Returns:
+                    Self for chaining.
+                """
                 self.context = context
                 return self
 
             def respond(self):
+                """Execute the POST handler.
+
+                Returns:
+                    The result of calling virtualResponder with context.
+                """
                 return self.virtualResponder(self.context)
 
     def __init__(self, bindAddress:str="127.0.0.1", httpPort:int=80, securePort:int=443, webRoot=None, debug=False) -> None:
+        """Initialize the brWebServer instance.
 
+        Args:
+            bindAddress: IP address to bind the server to.
+            httpPort: Port for HTTP traffic (default 80).
+            securePort: Port for HTTPS (currently unused in this implementation).
+            webRoot: Base directory for serving static files.
+            debug: Enable debug logging and packet dumping to files.
+        """
         # If debug is set, we will log at the lowest level + debug timings
         self.debug = debug
         # ------------
@@ -395,7 +599,20 @@ class brWebServer:
             logger.level = logging.DEBUG
     
     def buildRoute(self, routeType:str, virtualPath:str, virtualResponder:object|None=None, physicalPath:str=""):
+        """Register a new route with the server.
 
+        Supports GET, POST, and special "404" handler registration.
+
+        Args:
+            routeType: One of GET_ROUTE, POST_ROUTE, or "404".
+            virtualPath: The URL path to register.
+            virtualResponder: Function to call for dynamic responses.
+            physicalPath: Filesystem path for static file serving.
+
+        Raises:
+            brDuplicateRoute: If the route already exists.
+            brRouteInvalid: Propagated from route constructors.
+        """
         if routeType == brWebServer.route.GET_ROUTE:
             newRoute = brWebServer.route.getRoute(
                         virtualPath=virtualPath, 
@@ -428,6 +645,11 @@ class brWebServer:
                 raise brWebServer.brDuplicateRoute(virtualPath + " " + routeType)
 
     def startServer(self):
+        """Start the web server.
+
+        Configures UPNP port forwarding if possible, then launches the main
+        listening thread. Sets up default 404 handler if none was provided.
+        """
         result = configureUPNP(self.httpPort, "TCP", "Backrooms-net Web Dashboard")
         if result is not False:
             self.externalIP = result
@@ -439,12 +661,21 @@ class brWebServer:
             self.mainThread.start()
 
     def shutdownServer(self):
+        """Gracefully shutdown the server.
+
+        Removes UPNP mapping, signals shutdown, waits for main thread to exit.
+        """
         removeUPNP(self.httpPort, "TCP")
         self.shutdown = True
         logger.info("Sent shutdown signal - Main Thread is now waiting...")
         self.mainThread.join()
 
     def __mainLoop__(self):
+        """Main server loop. Binds socket, accepts connections, and spawns
+        handler threads. Periodically cleans up dead threads. Sets up default
+        404 page using brWebDefaults if none registered. Runs until shutdown
+        signal is received.
+        """
         self.running = True
 
         # Check a few defaults
@@ -513,6 +744,12 @@ class brWebServer:
         logger.info("All threads closed. Exiting main loop.")
 
     def __debugToFile__(data: bytes, id, count):
+        """Debug helper to write raw packets to timestamped files.
+
+        Only used when debug=True. Creates per-connection directories.
+
+        Note: This is a static method but defined inside the class.
+        """
         tempdir = Path(f'temp/{id}')
         if not tempdir.is_dir():
             os.mkdir(f'temp/{id}')
@@ -521,6 +758,18 @@ class brWebServer:
         logger.debug(f'Wrote packet to: temp/{id}/{str(count)}.packet')
 
     def __router__(self, parseResult: packetParser):
+        """Route an incoming parsed request to the appropriate handler.
+
+        Looks up the path in the registered routes dictionary. For POST,
+        ensures all body data is received first. Falls back to 404 handler
+        for unknown paths. Uses the route's respond() method.
+
+        Args:
+            parseResult: The packetParser instance with request details.
+
+        Returns:
+            requestResponse: The response object from the route handler.
+        """
         if parseResult.isRequest:
             reqPath = parseResult.requestPath
             if parseResult.requestType == brWebServer.route.GET_ROUTE:
@@ -556,12 +805,29 @@ class brWebServer:
         # Imports for various defaults
         from brCore.brWebServer import brWebDefaults
 
+        """Generate a generic 500 Internal Server Error response.
+
+        Uses default error page from brWebDefaults.
+
+        Returns:
+            bytes: Complete HTTP error response packet.
+        """
         reply: brWebServer.requestResponse = brWebDefaults.defaultServerError()
         packet = reply.setContentType("500").setBodySize().buildPacket()
         return packet
 
     def __connectionThread__(self, connection: socket.socket, address):
+        """Handle a single client connection in its own thread.
 
+        Receives packets, parses them, routes requests, sends responses.
+        Tracks statistics per thread and aggregates to server totals.
+        Supports debug packet logging to files. Handles clean disconnection
+        based on client Connection header or empty packets.
+
+        Args:
+            connection: Client socket.
+            address: (ip, port) tuple of client.
+        """
         netAddress = address[0]
         netPort = address[1]
         debugCount = 0
@@ -661,37 +927,60 @@ class brWebServer:
             self.connections.remove(connection)
 
 
-
 class brWebPage:
+    """Helper class for building dynamic web page responses.
+
+    Allows accumulation of HTML content and setting of appropriate HTTP status.
+    The buildResponse method converts it into a requestResponse object.
+    """
 
     def __init__(self) -> None:
+        """Initialize a new web page builder with empty content and status."""
         self.bodyData = b''
         self.responseStatus: str = ""
 
     def addContent(self, content: str|bytes):
+        """Append content to the page body.
+
+        Args:
+            content: Either a string (will be UTF-8 encoded) or bytes.
+        """
         if isinstance(content, bytes):
             self.bodyData += content
         else:
             self.bodyData += content.encode('utf-8')
 
     def setOK(self):
+        """Set response status to 200 OK."""
         self.responseStatus = brWebServer.requestResponse.WEB_OK
         pass
 
     def setNotFound(self):
+        """Set response status to 404 Not Found."""
         self.responseStatus = brWebServer.requestResponse.NOT_FOUND
         pass
 
     def setError(self):
+        """Set response status to 500 Internal Server Error."""
         self.responseStatus = brWebServer.requestResponse.SERVER_ERROR
         pass
 
     def setBadRequest(self):
+        """Set response status to 400 Bad Request."""
         self.responseStatus = brWebServer.requestResponse.BAD_REQUEST
         pass
 
     def buildResponse(self, context: brWebServer.packetParser):
+        """Create a requestResponse from the accumulated page content.
 
+        Resets internal state after building (bodyData and status cleared).
+
+        Args:
+            context: The packetParser to determine connection type from.
+
+        Returns:
+            requestResponse: Fully configured response object.
+        """
         reply = brWebServer.requestResponse(
             data=self.bodyData,
             serverStatus=self.responseStatus,

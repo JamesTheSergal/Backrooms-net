@@ -4,12 +4,27 @@ import pprint
 
 from . import BR_VERSION
 
+
 class brPacket:
-    
+    """brPacket - Core class for Backrooms Protocol packet handling.
+
+    Manages parsing raw network packets, validating protocol compliance,
+    building packets for transmission, and serializing/deserializing payloads
+    using Python's pickle module.
+
+    **Packet Format (17-byte header + data):**
+    - Byte 0: messageType (brMessageType enum, 1 byte)
+    - Bytes 1-14: version (null-padded UTF-8 string, 14 bytes)
+    - Bytes 15-16: contentLength (uint16 big-endian, 2 bytes)
+    - Bytes 17+: data (pickled object, ≤1483 bytes)
+
+    Raises backroomsProtocolException subclasses on violations.
+    """
     MAX_DATA_BYTES = 1483
     VALID_VERSIONS = ["0.0.1-alpha"]
 
     class backroomsProtocolException(Exception):
+        """Base exception raised for Backrooms Protocol violations."""
         pass
 
     class brPacketOversize(backroomsProtocolException):
@@ -68,6 +83,7 @@ class brPacket:
             return f"{self.message}\n{pprint.pprint(self.data)}"
 
     class brMessageType(IntEnum):
+        """Enumeration defining valid message types for brPacket."""
        # First phase introduction
         INTRODUCE = 0
         READY = 1
@@ -92,7 +108,19 @@ class brPacket:
         MESSAGE = 14        # Data to receive
         
         
+   
     def __init__(self, receivedPacket:bytes=None) -> None:
+        """Initialize packet from raw bytes or as builder.
+
+        Args:
+            receivedPacket (bytes, optional): Raw packet bytes to parse/validate.
+                If None, creates empty packet for outbound construction.
+
+        Raises:
+            brInvalidMessageType: Invalid message type byte.
+            brInvalidVersion: Malformed or unsupported version.
+            brInvalidContentLength: Invalid length field or oversized.
+        """
 
         if receivedPacket is not None:
             # Check Message type first
@@ -130,7 +158,16 @@ class brPacket:
             self.contentLength: int = 0
             self.data: bytes = b''
     
+    
     def setAllFieldsToBytes(self):
+        """Convert instance fields to serialized bytes for packet building.
+
+        Updates self.messageType (1 byte), self.version (14 bytes padded),
+        self.contentLength (2 bytes big-endian) in-place.
+
+        Raises:
+            brInvalidMessageType: If messageType unset.
+        """
         if self.messageType is None:
             raise self.brInvalidMessageType("Message type was not specified.")
         
@@ -139,14 +176,35 @@ class brPacket:
         self.version = self.version.encode("utf-8").ljust(14, b'\0')
 
 
+    
     def setMessageType(self, msgdesc:int):
+        """Set the packet message type.
+
+        Args:
+            msgdesc (int): Numeric value from brMessageType.
+
+        Returns:
+            brPacket: self (chainable).
+        """
         if msgdesc in brPacket.brMessageType:
             self.messageType = msgdesc
             return self
         else:
             pass # Raise exception 
         
+    
     def insertObject(self, insertdata:any):
+        """Serialize object into packet data via pickle.
+
+        Args:
+            insertdata (Any): Arbitrary Python object to store as payload.
+
+        Returns:
+            brPacket: self (chainable).
+
+        Raises:
+            brPacketOversize: Pickled data exceeds MAX_DATA_BYTES (1483).
+        """
         objdata = pickle.dumps(insertdata)
         if len(objdata) <= self.MAX_DATA_BYTES:
             self.contentLength = len(objdata)
@@ -155,11 +213,33 @@ class brPacket:
             raise self.brPacketOversize()
         return self
         
+    
     def rebuildObject(self):
+        """Deserialize packet data back to Python object.
+
+        Returns:
+            Any: Original object from pickle.loads(self.data).
+
+        Note:
+            No validation; may raise pickle.UnpicklingError.
+        """
         objdata = pickle.loads(self.data)
         return objdata
 
+    
     def buildPacket(self, msgType:brMessageType=None) -> bytes:
+        """Assemble complete packet bytes from fields.
+
+        Args:
+            msgType (brMessageType, optional): Set message type if unset.
+
+        Returns:
+            bytes: Validated packet bytes (header + data).
+
+        Raises:
+            brInvalidMessageType: Message type invalid/missing.
+            brPreFlightCheckFailure: Header != 17 bytes.
+        """
 
         if msgType is not None:
             self.setMessageType(msgType.value)
@@ -182,14 +262,41 @@ class brPacket:
         
         return packet
     
+    
     def createSimpleHello(self):
+        """Build empty INTRODUCE packet for initial connection.
+
+        Returns:
+            bytes: Ready-to-send packet.
+        """
         return self.buildPacket(brPacket.brMessageType.INTRODUCE)
     
+    
     def createSimpleReady(self):
+        """Build empty READY packet to acknowledge handshake.
+
+        Returns:
+            bytes: Ready-to-send packet.
+        """
         return self.buildPacket(brPacket.brMessageType.READY)
     
+    
     def createCallbackPing(self):
+        """Build empty CALLBACK_PING packet for latency/response window.
+
+        Returns:
+            bytes: Ready-to-send packet.
+        """
         return self.buildPacket(brPacket.brMessageType.CALLBACK_PING)
     
+    
     def createNodeInfo(self, message):
+        """Build NODE_INFO packet with pickled node details.
+
+        Args:
+            message (Any): Node information object.
+
+        Returns:
+            bytes: Ready-to-send packet.
+        """
         return self.insertObject(message).buildPacket(brPacket.brMessageType.NODE_INFO)
