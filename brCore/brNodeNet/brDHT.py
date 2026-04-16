@@ -175,8 +175,8 @@ class brDHT:
             
             elif self.outbox.qsize() != 0:
                 request:DHTRequest = self.outbox.get()
-                await self.dhtServer.set(key, data)
-                log.info(f"DHT: Sent key: {key}")
+                await self.dhtServer.set(request.key, request.value)
+                log.info(f"DHT: Sent key: {request.key}")
             else:
                 await asyncio.sleep(1)
                 
