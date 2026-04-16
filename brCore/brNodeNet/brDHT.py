@@ -101,6 +101,10 @@ class brDHT:
             log.info("Boot strapping DHT server...")
             self.asyncloop.run_until_complete(self.dhtServer.bootstrap(self.bootstraplist))
             self.hasBootStrapped = True
+            
+        self.asyncloop.call_soon_threadsafe(
+            lambda: self.dhtServer.refresh_table(interval=30)
+        )
     
     def setBootstrapList(self, bootstraplist):
         """Sets the bootstrap list for the DHT server and bootstraps asynchronously.
