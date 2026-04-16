@@ -189,11 +189,11 @@ class brDHT:
         Configures UPNP, runs the event loop indefinitely,
         removes UPNP mapping on exit.
         """
-        if configureUPNP(self.serverport, "UDP", "Backrooms-net DHT Server") is not False:
-            logging.info("UPNP configured for DHT.")
+        #if configureUPNP(self.serverport, "UDP", "Backrooms-net DHT Server") is not False:
+            #logging.info("UPNP configured for DHT.")
         self.asyncloop.run_forever()
         log.info("DHT Server Async Thread got shutdown signal.")
-        removeUPNP(self.serverport, "UDP")
+        #removeUPNP(self.serverport, "UDP")
         
     def returnDHTLongID(self):
         """
