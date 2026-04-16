@@ -8,7 +8,7 @@ from ..brNodeNet.brRoute import brRoute
 from ..brSockets.brPacket import brPacket
 from ..brSockets.netconnection import netconnection
 from ..brEnclave.Enclave import Enclave
-from .brHandshake import brHandshake, brControllerRequest
+from .brHandshake import brHandshake, brControllerRequest, brBasicHandshake
 
 logger = brAgentLog
 
@@ -24,6 +24,7 @@ class brNetwork:
         self.listenerThreads:list[threading.Thread] = []
         self.initiatorThreads:list[threading.Thread] = []
         self.trafficThreads:list[threading.Thread] = []
+        self.statsupdaterThread = threading.Thread(name="brNetwork-Stats-updater", target=self.statsupdater, args=[])
         
         # Locks
         self.controllerLock = threading.Lock()
@@ -41,6 +42,8 @@ class brNetwork:
         # For external controller
         self.toRouter = Queue(maxsize=25000)
         self.connectRequest = Queue(maxsize=25000)
+        
+        self.statsupdaterThread.start()
         
     def startListener(self, bindAddress:str="127.0.0.1", nodePort:int=13337):
         logger.info(f"Starting node connection listener on: {bindAddress}:{nodePort}")
@@ -79,10 +82,14 @@ class brNetwork:
                 trackconnection = netconnection(connection, ip, port, True, encryptionident=self.secureEnclave.assignedIdentity)
                 self.trackedConnections.append(trackconnection)
                 
-                pendingNode = brNode()
-                pendingNode.setNodeAddress(address)
+                pendingNode = brNode(ip, port)
 
-                pendingRoute = brRoute(brRoute.brRouteType.TEST, connection, pendingNode, brRoute.brConnectionDirection.RECEIVED)
+                pendingRoute = brRoute(routeType=brRoute.brRouteType.TEST,
+                                       assignedConn=trackconnection,
+                                       externalNode=pendingNode, 
+                                       connectionType=brRoute.brConnectionDirection.RECEIVED
+                )
+                self.secureEnclave.appendOntoList("nodeRoutes", pendingRoute)
 
                 spawnThread = threading.Thread(name=f'brNodeCon-received-({address})',target=self.__connectionThread__, args=[pendingRoute])
                 self.trafficThreads.append(spawnThread)
@@ -132,7 +139,14 @@ class brNetwork:
                     obsoc = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                     logger.debug("Attempting to connect to node...")
                     obsoc.connect((outboundIP, outboundPort))
-                    connectjob.assignedConn = obsoc
+                    
+                    connectjob.assignedConn = netconnection(soc=obsoc,
+                                                            ip=outboundIP,
+                                                            port=outboundPort,
+                                                            connected=True,
+                                                            encryptionident=self.secureEnclave.assignedIdentity
+                    )
+                    
                     spawnThread = threading.Thread(name=f'brNodeCon-outbound-({outboundIP})',target=self.__connectionThread__, args=[connectjob])
                     self.trafficThreads.append(spawnThread)
                     spawnThread.start()
@@ -160,89 +174,41 @@ class brNetwork:
                 
         #logger.info("All threads closed. Exiting main loop.")
     
-    def __handshakeSafeLoop__(self, nodeRoute:brRoute):
+    def statsupdater(self):
         
+        logger.info("Started network stat updater thread...")
         
-        netAddress = nodeRoute.externalNode.nodeIP
-        netPort = nodeRoute.externalNode.nodePort
-        connection = nodeRoute.assignedConn
-        
-        # Check if we are the initiator and send introduction packet
-        if nodeRoute.connectionType is brRoute.brConnectionDirection.INITIATED:
-            sequence:Queue = brHandshake.brInitiateBasicHandshake()
-            runnable = sequence.get()
-            message = runnable()
-            try:
-                connection.sendall(message)
-                logger.info(f"Sent introduction packet to {netAddress}")
-            except:
-                logger.exception("We attempted to initiate the connection and failed to get a proper response!", exc_info=True)
-        else:
-            sequence:Queue = brHandshake.brReceiveBasicHandshake()
+        while self.shutdown is False:
             
-        while nodeRoute.externalNode.finishedUnencryptedHandshake is False:
+            incomingBytes = 0
+            outgoingBytes = 0
+            requests = 0
             
-            # Receive action
-            try:
-                rawpacket = connection.recv(1500)  # TODO: Set time-out to kill threads we aren't using
-                #ourHandledBytes += len(rawpacket)
-                message = brPacket(rawpacket)
-                nodeRoute.mostRecentPacket = message
-
-            except:
-                logger.exception("Critical error when receiving data!", exc_info=True)
-                break
             
-            runnable = sequence.get()
-            result = runnable(message)
+            for connection in self.trackedConnections:
+                time.sleep(0.05)
+                incomingBytes += connection.bytesin
+                outgoingBytes += connection.bytesout
+                requests += connection.totalrequests
             
-            if type(result) is brHandshake.handshakeResult:
-                result:brHandshake.handshakeResult
-                if result.error is False:
-                    runnable = sequence.get()
-                    result = runnable()
-                    if type(result) is bytes:
-                        connection.send(result)
-                    elif type(result) is brControllerRequest:
-                        result:brControllerRequest
-                        result.routeInfo = nodeRoute
-                        self.toRouter.put(result)
-                        logger.info("Waiting for controller request to complete...")
-                        result.waitForRequestComplete()
-                        logger.info("Request completed")
-                        connection.sendall(result.response)
-                else:
-                    logger.error(f'Error with handshake validation: {result.additionalInfo} {result.rawData}')
-                    connection.close()
-                    break
-            elif type(result) is brControllerRequest:
-                result:brControllerRequest
-                result.routeInfo = nodeRoute
-                self.toRouter.put(result)
-                logger.info("Waiting for controller request to complete...")
-                result.waitForRequestComplete()
-                logger.info("Request completed")
-                connection.sendall(result.response)
-            elif type(result) is bytes:
-                pass
-        
-        logger.info("Completed basic handshake!")
-       
-    
+            self.handledIncomingBytes = incomingBytes
+            self.handledOutgoingBytes = outgoingBytes
+            self.respondedToRequests = requests
+            
+            time.sleep(1)
+            
+        logger.info("Stat updater thread exiting...")
+                
     def __connectionThread__(self, nodeRoute:brRoute):
 
-        netAddress = nodeRoute.externalNode.nodeIP
-        netPort = nodeRoute.externalNode.nodePort
-        connection = nodeRoute.assignedConn
-        
-
-        # Statistics gathering
-        ourHandledBytes = 0
-        ourOutgoingBytes = 0
-        ourHandledRequests = 0
-        # ----
-
-        self.__handshakeSafeLoop__(nodeRoute=nodeRoute)
+        if nodeRoute.connectionType is brRoute.brConnectionDirection.INITIATED:
+            nodeConfig = {"uuid": self.secureEnclave.returnData("selfUUID"), "webport":self.secureEnclave.returnData("webPort")}
+            brBasicHandshake(nodeRoute.assignedConn).initiate(nodeConfig)
+        else:
+            nodeConfig = brBasicHandshake(nodeRoute.assignedConn)
+            nodeRoute.externalNode.setNodeUUID(nodeConfig["uuid"])
+            nodeRoute.externalNode.webPort = nodeConfig["webport"]
+            nodeRoute.externalPubKeyCheck()
         
         # START OF CONTINUOUS LOOP
         #
@@ -250,74 +216,34 @@ class brNetwork:
         #
         
         nodeRoute.setConnectedState(True)
+        con = nodeRoute.assignedConn
         
         while not self.shutdown:
 
             # Receive action
             try:
-                rawpacket = connection.recv(1500)  # TODO: Set time-out to kill threads we aren't using
-                ourHandledBytes += len(rawpacket)
+                packet = con.receivePacket()
             except:
                 logger.exception("Critical error when receiving data!", exc_info=True)
                 break
-            
-            # Decrypt and parse
-            try:
-                if rawpacket:
-                    if nodeRoute.encryptionUpgraded:
-                        rawpacket = self.secureEnclave.assignedIdentity.decryptChunk(rawpacket)
-                        #TODO: Out of sync encryption when reconnecting to node.
-                        #Must find a better way to coordinate 
-                    message = brPacket(rawpacket)
-                    nodeRoute.mostRecentPacket = message
-                else:
-                    logger.info("Got empty packet. This thread will close.")
-                    connection.close()
-                    break
-            except Exception as e:
-                logger.exception("Critical error when processing client packet!", exc_info=True)
-                break
+
             
             # Decision making / Send to Controller for more data
             
             # Decision table
             connected = nodeRoute.externalNode.connected
-            basicHandshake = nodeRoute.externalNode.finishedUnencryptedHandshake
             fullHandshake = nodeRoute.externalNode.finishedHandshake
   
             # if conditions are met, send to router 
             
-
-            if message.messageType is brPacket.brMessageType.INTRODUCE or brPacket.brMessageType.READY:
-                try:
-                    self.toRouter.put(nodeRoute)
-                    ourHandledRequests+= 1
-                except Exception as e:
-                    logger.exception("Critical error when processing request!", exc_info=True) # TODO: handle brInvalidMessageType
-                    break
+            match packet.messageType:
                 
-                logger.info("Waiting for router to process packet...")
-                while not nodeRoute.routerActionConfirmation():
+                case brPacket.brMessageType.CALLBACK_PING:
+                    # We are currently IDLE
+                    nodeRoute.setRouteStateIdle()
                     time.sleep(1)
-                logger.info("Router has responded to the packet!")
+                    con.sendPing()
             
-            # Decisions that can be made without the router/controller
-            
-            if not connected:
-                logger.error("Node disconnect after router processing")
-                connection.close()
-                break
-            
-            # Process route inbox and outbox
-            
-            try:
-                job = nodeRoute.outbox.get(block=True, timeout=0.15)
-            except Empty:
-                pass
-            if type(job) is bytes:
-                connection.sendall(job)
-            else:
-                logger.error("Unknown job type received from Router.")
             
             #if reply == False:
             #    logger.error("Got a false return from the router. Something went wrong. Exiting.")
@@ -360,11 +286,11 @@ class brNetwork:
         if self.shutdown:
             logger.info("Thread got shutdown signal.")
             nodeRoute.setConnectedState(False)
-            connection.close()
+            con.close()
         else:
             logger.info(f'Thread abnormal shutdown.')
             #nodeRoute.setConnectedState(False)
-            connection.close()
+            con.close()
 
         
         # Publish our stats really quick
