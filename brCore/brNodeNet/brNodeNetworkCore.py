@@ -19,6 +19,7 @@ from ..brSockets.brNetwork import brNetwork
 from ..brSockets.brHandshake import brHandshake, brControllerRequest
 from .brRoute import brRoute
 from .brDHT import brDHT
+from ..brSockets.netconnection import netconnection
 
 BR_VERSION = "0.0.1-alpha"
 
@@ -157,12 +158,9 @@ class brNodeServer:
                     webport = 443
                 try:
                     socket.inet_aton(ip) # Will fail if it isn't a proper IP address
-                    newNodeObject = brNode()
-                    newNodeObject.nodeIP = ip
-                    newNodeObject.nodePort = port
-                    newNodeObject.webPort = webport
+                    newNodeObject = brNode(nodeIP=ip, nodePort=port, webPort=webport)
                     if newNodeObject.queryPubKey():  # TODO: Add check - and ip != usIP
-                        pendingRoute = brRoute(brRoute.brRouteType.TEST, None, newNodeObject, brRoute.brConnectionDirection.INITIATED)
+                        pendingRoute = brRoute(routeType=brRoute.brRouteType.TEST, externalNode=newNodeObject, connectionType=brRoute.brConnectionDirection.INITIATED)
                         allroutes.append(pendingRoute)
                     else:
                         logger.error(f'Seed server {ip} did not respond correctly when we asked for their public key. (Security Issue?)')
@@ -178,8 +176,9 @@ class brNodeServer:
             # Since pickle cannot store thread locks, we must be careful and re-populate this
             node.recordThreadLock = threading.Lock()
 
-            pendingRoute = brRoute(brRoute.brRouteType.TEST, None, node, brRoute.brConnectionDirection.INITIATED)
+            pendingRoute = brRoute(routeType=brRoute.brRouteType.TEST,externalNode=node, connectionType=brRoute.brConnectionDirection.INITIATED)
             allroutes.append(pendingRoute)
+        return allroutes
         
     
     def __debugToFile__(data: bytes, id, count):
@@ -315,6 +314,7 @@ class brNodeServer:
             self.uuid = uuid.uuid4()
             logger.info(f"Network controller new UUID is: {self.uuid}")
             self.secureEnclave.insertData("selfUUID", self.uuid)
+            self.secureEnclave.insertData("webPort", self.webPort)
         else:
             self.uuid = self.secureEnclave.returnData("selfUUID")
         
@@ -354,13 +354,11 @@ class brNodeServer:
             
             if self.secureEnclave.isEncKey("connect_ip"):
                 logger.info("Got connection request from the web server")
-                newNodeObject = brNode()
-                newNodeObject.nodeIP = self.secureEnclave.returnData("connect_ip")
-                newNodeObject.nodePort = self.secureEnclave.returnData("connect_port")
+                newNodeObject = brNode(nodeIP=self.secureEnclave.returnData("connect_ip"), nodePort=self.secureEnclave.returnData("connect_port"))
                 self.secureEnclave.deleteKey("connect_ip")
                 self.secureEnclave.deleteKey("connect_port")
                 
-                pendingRoute = brRoute(brRoute.brRouteType.TEST, None, newNodeObject, brRoute.brConnectionDirection.INITIATED)
+                pendingRoute = brRoute(routeType=brRoute.brRouteType.TEST, externalNode=newNodeObject, connectionType=brRoute.brConnectionDirection.INITIATED)
                 self.socketControl.connectRequest.put(pendingRoute)
             
             time.sleep(1)

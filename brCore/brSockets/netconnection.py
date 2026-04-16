@@ -32,10 +32,13 @@ class netconnection:
         self.send(brPacket().createSimpleReady())
     
     def sendHello(self):
-        self.send(brPacket().createSimpleReady())
+        self.send(brPacket().createSimpleHello())
         
     def sendPing(self):
-        self.send(brPacket().createSimpleReady())
+        self.send(brPacket().createCallbackPing())
+    
+    def sendNodeInfo(self, message):
+        self.send(brPacket().createNodeInfo(message))
         
     def close(self):
         self.soc.close()

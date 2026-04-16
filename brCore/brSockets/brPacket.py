@@ -153,6 +153,7 @@ class brPacket:
             self.data = objdata
         else:
             raise self.brPacketOversize()
+        return self
         
     def rebuildObject(self):
         objdata = pickle.loads(self.data)
@@ -189,3 +190,6 @@ class brPacket:
     
     def createCallbackPing(self):
         return self.buildPacket(brPacket.brMessageType.CALLBACK_PING)
+    
+    def createNodeInfo(self, message):
+        return self.insertObject(message).buildPacket(brPacket.brMessageType.NODE_INFO)

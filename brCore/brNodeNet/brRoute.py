@@ -1,3 +1,4 @@
+from dataclasses import dataclass, field
 from enum import IntEnum
 from queue import Queue
 import random
@@ -6,12 +7,13 @@ import threading
 import time
 import uuid
 from . import brNodeCoreLog
-from . import brNode
+from ..brNodeNet.brNode import brNode
 from ..brSockets.brPacket import brPacket
+from ..brSockets.netconnection import netconnection
 logger = brNodeCoreLog
 
+@dataclass
 class brRoute:
-
     class brRouteType(IntEnum):
         CONTROL = 0
         TEST = 1
@@ -24,71 +26,49 @@ class brRoute:
         INITIATED = 0
         RECEIVED = 1
 
-    def __init__(self, routeType:brRouteType, assignedConnection:socket.socket, externalNode:brNode, connectionType:brConnectionDirection):
-        
-        # Route Info
-        self.routeID = uuid.uuid4()
-        self.routeType = routeType 
-        self.routeSecret = random.randrange(0, 1000000)
-        # If we are a hop, we won't know these
-        self.connectingFrom = None # Client on our end we are connecting
-        self.connectingTo = None # Would be the client specifically we created this route for
-        
-        # Physical connection
-        self.connectionType = connectionType
-        self.assignedConn:socket.socket = assignedConnection # Our thread or some such
-        self.connThread: threading.Thread = None
-        
-        # External Node info
-        self.externalNode:brNode = externalNode # Would be the node Record 
-        
-        # Locks
-        self.routeThreadLock = threading.Lock()
-        
-        # Controller
-        self.timeToLive = 0
-        self.controllerLastSeen = 0
-        self.encryptionUpgraded = False
-        self.mostRecentPacket:brPacket = None
-        self.routerAction = False
-        self.connectionFailed = False
+    # Fields
+    routeType: brRouteType
+    externalNode: brNode
+    connectionType: brConnectionDirection
+    assignedConn: netconnection = None
+    routeID: uuid.UUID = field(default_factory=uuid.uuid4)
+    routeSecret: int = field(default_factory=lambda: random.randrange(0, 1000000))
+    connectingFrom: str = None
+    connectingTo: str = None
+    #routeThreadLock: threading.Lock = field(default_factory=threading.Lock) # Will be removed later. Pickle can't serialize
+    timeToLive: int = 0
+    controllerLastSeen: float = 0
+    encryptionUpgraded: bool = False
+    routerAction: bool = False
+    connectionFailed: bool = False
+    newNews: bool = False
+    news: Queue = field(default_factory=lambda: Queue(maxsize=1000))
+    newIncoming: bool = False
+    inbox: Queue = field(default_factory=lambda: Queue(maxsize=1000))
+    newOutgoing: bool = False
+    outbox: Queue = field(default_factory=lambda: Queue(maxsize=1000))
+    routeState: str = "Unknown"
 
-        # Connection updates
-        self.newNews = False
-        self.news = Queue(maxsize=1000)
-        self.newIncoming = False
-        self.inbox = Queue(maxsize=1000)
-        self.newOutgoing = False
-        self.outbox = Queue(maxsize=1000)
-        self.routeState = "Unknown"
-
-        # Make reference to this route in the third party record
-        with self.externalNode.recordThreadLock:
-            self.externalNode.participatingInRoutes.append(self)
 
     def routerActionConfirmation(self):
         if self.routerAction:
-            with self.routeThreadLock:
-                self.routerAction = False
+            self.routerAction = False
             return True
         else:
             return False
         
     def routerPerformedAction(self):
-        with self.routeThreadLock:
-            self.routerAction = True
+        self.routerAction = True
     
     def isHandShakeComplete(self):
         return self.externalNode.finishedHandshake
     
     def setHandShakeComplete(self):
         logger.debug(f'Handshake with {self.externalNode.nodeIP} complete.')
-        with self.routeThreadLock:
-            self.externalNode.finishedHandshake = True
+        self.externalNode.finishedHandshake = True
 
     def setConnectedState(self, state:bool):
-        with self.routeThreadLock:
-            self.externalNode.connected = state
+        self.externalNode.connected = state
 
     def externalPubKeyCheck(self):
         # Just make sure we have the other parties Public key.
@@ -101,32 +81,27 @@ class brRoute:
             return True
                 
     def setRouteStateIdle(self):
-        with self.routeThreadLock:
-            self.routeState = "Idle"
+        self.routeState = "Idle"
 
     def setRouteStateBusy(self):
-        with self.routeThreadLock:
-            self.routeState = "Busy"
+        self.routeState = "Busy"
 
     def upgradeRouteType(self, brtype:brRouteType):
-        with self.routeThreadLock:
-            self.routeType = brtype
-            self.controllerLastSeen = 0
+        self.routeType = brtype
+        self.controllerLastSeen = 0
     
     def controllerLastSeenNow(self):
-        with self.routeThreadLock:
-            self.controllerLastSeen = time.time()
+        self.controllerLastSeen = time.time()
 
     def removeRouteReference(self):
-        with self.externalNode.recordThreadLock:
             self.externalNode.participatingInRoutes.remove(self)
             
     def makeDHTAnnounceDict(self, controllerID):
         key = f'{self.routeID}_route'
-        data = {'routeType': self.route.routeType,
-                'connectingFrom': self.route.connectingFrom,
-                'connectingTo': self.route.connectingTo,
-                'externalNode': self.route.externalNode.localNodeID,
-                'timeToLive': self.route.timeToLive,
-                'routeState': self.route.routeState}
+        data = {'routeType': self.routeType,
+                'connectingFrom': self.connectingFrom,
+                'connectingTo': self.connectingTo,
+                'externalNode': self.externalNode.localNodeID,
+                'timeToLive': self.timeToLive,
+                'routeState': self.routeState}
         return (key, data)

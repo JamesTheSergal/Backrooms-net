@@ -5,7 +5,6 @@ import uuid
 import requests
 from dataclasses import dataclass, field
 
-from .brRoute import brRoute
 from . import brNodeCoreLog
 logger = brNodeCoreLog
 
@@ -23,7 +22,6 @@ class brNode:
     # State
     lastLatency: int = 0
     connected: bool = False
-    finishedUnencryptedHandshake: bool = False
     finishedHandshake: bool = False
 
     # Identity
@@ -34,7 +32,7 @@ class brNode:
     # For controller
     firstSeen: float = field(default_factory=time.time)
     lastSeen: float = 0
-    recordThreadLock: threading.Lock = field(default_factory=threading.Lock)
+    #recordThreadLock: threading.Lock = field(default_factory=threading.Lock) # Will be removed later. Pickle can't serialize
 
 
     def queryPubKey(self):
@@ -60,12 +58,11 @@ class brNode:
             return False
 
     def setNodeDisconnectedState(self):
-        with self.recordThreadLock:
-            self.lastLatency = 0
-            self.connected = False
-            self.participatingInRoutes.clear()
-            # Pickle cannot store thread locks, so we must make it none!
-            self.recordThreadLock = None
+        self.lastLatency = 0
+        self.connected = False
+        self.participatingInRoutes.clear()
+
+
         return self
     
     def setNodeUUID(self, newuuid):
