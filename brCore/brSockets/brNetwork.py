@@ -188,7 +188,7 @@ class ConnectionManager:
         try:
             while not self.shutdown and route.externalNode.connected:
                 try:
-                    packet = conn.receivePacket(timeout=0.2)
+                    packet = conn.receivePacket()
                     if packet:
                         self.event_queue.put(NetworkEvent(
                             EventType.PACKET_RECEIVED, 
