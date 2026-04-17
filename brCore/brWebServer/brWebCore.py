@@ -643,7 +643,17 @@ class brWebServer:
                 self.getRoutes[virtualPath] = newRoute
             else:
                 raise brWebServer.brDuplicateRoute(virtualPath + " " + routeType)
+        
+        if self.running:
+            logger.info(f'Dynamically added {virtualPath} to the running server config')
 
+    def removeRoute(self, virtualPath:str):
+        if virtualPath not in self.getRoutes.keys():
+            raise brWebServer.brRouteInvalid("Route cannot be removed if it hasn't been set up!")
+        else:
+            self.getRoutes.pop(virtualPath)
+            logger.info(f'Dynamically removed: {virtualPath} from the running server config')
+    
     def startServer(self):
         """Start the web server.
 

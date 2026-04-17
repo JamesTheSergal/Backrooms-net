@@ -171,7 +171,8 @@ class brDHT:
             if self.requestbox.qsize() != 0:
                 request = self.requestbox.get()
                 result = await self.dhtServer.get(request)
-                self.requestresults[request] = result
+                request.value = result
+                self.requestresults[request.request_id] = request
             
             elif self.outbox.qsize() != 0:
                 request:DHTRequest = self.outbox.get()

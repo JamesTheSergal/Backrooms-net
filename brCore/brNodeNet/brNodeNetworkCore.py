@@ -20,9 +20,10 @@ from ..brSockets.brNetwork import ConnectionManager
 from .brRoute import brRoute
 from ..brSockets.brHandshake import brBasicHandshake
 from .router import Router
-from .events import EventType, NetworkEvent
+from .events import EventType, NetworkEvent, DHTRequest, EndPointEvent
 from .brDHT import brDHT
 from ..brSockets.netconnection import netconnection
+from .brEndpoint import brEndpoint
 from queue import Queue
 
 BR_VERSION = "0.0.1-alpha"
@@ -42,9 +43,12 @@ class brNodeServer:
         self.secureEnclave = secureEnclave
         self.dht = dhtServer
         self.event_queue = Queue(maxsize=10000)
+        self.dht_queue = Queue(maxsize=10000)
         self.connection_manager = ConnectionManager(secureEnclave, self.event_queue)
         
         self.knownNodes:list[brNode] = []
+        self.endPoints:dict[str][brEndpoint] = {}
+        self.dhtResponses:dict[str][DHTRequest] = {}
         self.routes = []
         self.router = Router(self.secureEnclave, self.dht, self.event_queue)
         
@@ -70,7 +74,7 @@ class brNodeServer:
     def shutdownServer(self):
         #removeUPNP(self.nodePort, "TCP")
         self.shutdown = True
-        self.socketControl.shutdown = True
+        self.connection_manager.shutdown = True
         logger.info("Sent shutdown signal - Node Main Thread is now waiting...")
         # Fix this later
         
@@ -80,30 +84,71 @@ class brNodeServer:
         
         while not self.shutdown:
             try:
-                event: NetworkEvent = self.event_queue.get(timeout=0.3)
+                event = self.event_queue.get(timeout=0.3)
                 self._handle_event(event)
             except Empty:
                 self._do_periodic_maintenance()
                 continue
     
     def _handle_event(self, event: NetworkEvent):
-        if event.event_type == EventType.CONNECTION_ESTABLISHED:
-            self._handle_new_connection(event.route)
-        elif event.event_type == EventType.PACKET_RECEIVED:
-            self.router.handle_packet(event.route, event.packet)
-        elif event.event_type == EventType.CONNECTION_CLOSED:
-            self._handle_disconnect(event.route)
-        elif event.event_type == EventType.SUBMIT_KNOWN_NODE:
-            self.known_nodes.append(event.node)
+        match event:
+            
+            case NetworkEvent():
+                
+                match event.event_type:
+                    
+                    case EventType.CONNECTION_ESTABLISHED:
+                        self._handle_new_connection(event.route)
+                    
+                    case EventType.PACKET_RECEIVED:
+                        self.router.handle_packet(event.route, event.packet)
+                        
+                    case EventType.CONNECTION_CLOSED:
+                        self._handle_disconnect(event.route)
+                        
+                    case EventType.SUBMIT_KNOWN_NODE:
+                        self.known_nodes.append(event.node)
+                        
+            case DHTRequest():
+                
+                self._handle_DHT_response()
+            
+            case EndPointEvent():
+                
+                match event.event_type:
+                    
+                    case EventType.NEW_ENDPOINT_CLIENT:
+                        pass
+                    
+                    case EventType.GET_ENDPOINT_FROM_TOKEN:
+                        pass
+                    
+                    case EventType.ENDPOINT_REQUESTS_FIND_TARGET:
+                        pass
     
     def _perform_initial_bootstrapping(self):
         try:
             nodelist:list[brNode] = self.secureEnclave.returnData("knownNodes")
         except Enclave.enclaveValueDoesNotExist:
             logger.info("No saved nodes for bootstrap.")
+            
+        if not self.secureEnclave.isEncKey("selfUUID"):
+            self.uuid = uuid.uuid4()
+            logger.info(f"Network controller new UUID is: {self.uuid}")
+            self.secureEnclave.insertData("selfUUID", self.uuid)
+    
+    def _maintenance_DHT_TTLs(self):
+        removed = 0
+        for key in self.dhtResponses.keys():
+            check_response = self.dhtResponses[key]
+            if (time.time() - check_response.created_at >= check_response.time_to_live_seconds):
+                self.dhtResponses.pop(key)
+                removed += 1
+        if removed > 0:
+            logger.info(f'Removed {removed} DHT Responses that expired.')
     
     def _do_periodic_maintenance(self):
-        pass
+        self._maintenance_DHT_TTLs()
     
     def _handle_disconnect(self, route: brRoute):
         pass
@@ -120,7 +165,13 @@ class brNodeServer:
         # else the receiver side already did it via the handshake class
         self.routes.append(route)
         self.event_queue.put(NetworkEvent(EventType.HANDSHAKE_COMPLETE, route=route))
-        
+    
+    def _handle_DHT_response(self, response:DHTRequest):
+        if response.forController:
+            self.dht_queue.put(response)
+        else:
+            self.dhtResponses[response.request_id] = response
+    
     def connect_to_node(self, ip: str, port: int):
         node = brNode(nodeIP=ip, nodePort=port)
         route = brRoute(
