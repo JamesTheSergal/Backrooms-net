@@ -40,7 +40,7 @@ else:
 # Sockets and network
 import brCore.brSockets
 import brCore.brNodeNet
-from brCore.brNodeNet import brNodeNetworkCore
+from brCore.brNodeNet import brController
 from brCore.brNodeNet.brDHT import brDHT
 
 # Enclave

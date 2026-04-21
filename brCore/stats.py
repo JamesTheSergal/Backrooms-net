@@ -1,6 +1,6 @@
 from .brWebServer.brWebCore import brWebServer
 from .brEnclave.Enclave import Enclave
-from .brNodeNet.brNodeNetworkCore import brNodeServer
+from .brNodeNet.brController import brNodeServer
 import time
 
 class statHandler:
