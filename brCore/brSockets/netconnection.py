@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from .brPacket import brPacket
 from ..brEnclave import Identity
+from . import brNodeCoreLog as logger
 import socket
 
 @dataclass
@@ -92,7 +93,12 @@ class netconnection:
         Returns:
             brPacket: The parsed and validated packet.
         """
+        self.soc.settimeout(0.25)
         raw = self.soc.recv(1500)
+        if len(raw) == 0:
+            logger.warning(f"EOF from peer {self.ip}:{self.port} - connection closed")
+            self.close()
+            raise ConnectionError(f"Connection closed by peer {self.ip}:{self.port}")
         self.bytesin += len(raw)
         self.totalrequests += 1
         self.lastpacket = brPacket(raw)

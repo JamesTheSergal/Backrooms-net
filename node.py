@@ -4,6 +4,7 @@ from pathlib import Path
 import time
 from brCore import loggingfactory
 from brCore import brWebCore, brNodeNetworkCore, brWebElements, brDHT
+from brCore.brWebServer import setup_webserver
 from brCore import brCoreSettings
 from brCore import logLevel
 from brCore import BR_VERSION
@@ -83,14 +84,7 @@ class brNode:
     def startWebServer(self, bindAddress:str="0.0.0.0", port:int=11000, debug:bool=False):
         self.webServer = brWebCore.brWebServer(bindAddress=bindAddress, httpPort=port, debug=debug)
         self.brWebUI = brWebElements.brWebUIModule(self.mainEnclave, self.nodeServer, self.webServer)
-        self.webServer.buildRoute(brWebCore.brWebServer.route.GET_ROUTE, "/", self.brWebUI.brUIRoot)
-        self.webServer.buildRoute(brWebCore.brWebServer.route.GET_ROUTE, "/stats", self.brWebUI.statsPage)
-        self.webServer.buildRoute(brWebCore.brWebServer.route.GET_ROUTE, "/pubkey", self.brWebUI.ourPublicKey)
-        self.webServer.buildRoute(brWebCore.brWebServer.route.GET_ROUTE, "/requestuuid", self.brWebUI.clientGetUUID4)
-        self.webServer.buildRoute(brWebCore.brWebServer.route.GET_ROUTE, "/announce", self.brWebUI.brAnnounce)
-        self.webServer.buildRoute(brWebCore.brWebServer.route.POST_ROUTE, "/announce/publickey", self.brWebUI.brAnnouncePost)
-        self.webServer.buildRoute(brWebCore.brWebServer.route.GET_ROUTE, "/insecureannounce", self.brWebUI.insecureAnnounce)
-        self.webServer.buildRoute(brWebCore.brWebServer.route.POST_ROUTE, "/insecureannounce", self.brWebUI.insecureAnnouncePost)
+        setup_webserver(self.webServer, self.brWebUI)
         self.webServer.startServer()
         logging.info(f"Backrooms configured to run a webserver on: {bindAddress}:{port}")
         time.sleep(5)

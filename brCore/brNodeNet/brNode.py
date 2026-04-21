@@ -28,6 +28,7 @@ class brNode:
     lastLatency: int = 0
     connected: bool = False
     finishedHandshake: bool = False
+    finishedBasicHandshake: bool = False
 
     # Identity
     identity: Identity = None
@@ -37,6 +38,7 @@ class brNode:
     # For controller
     firstSeen: float = field(default_factory=time.time)
     lastSeen: float = 0
+    apartOfRoutes:list = field(default_factory=list)
     #recordThreadLock: threading.Lock = field(default_factory=threading.Lock) # Will be removed later. Pickle can't serialize
 
 
@@ -132,3 +134,11 @@ class brNode:
                 'firstSeen': self.firstSeen,
                 'lastSeen': self.lastSeen}
         return (key, data)
+    
+    def addApartOfRoute(self, route):
+        if route not in self.apartOfRoutes:
+            self.apartOfRoutes.append(route)
+    
+    def removeApartOfRoute(self, route):
+        if route in self.apartOfRoutes:
+            self.apartOfRoutes.pop(route)

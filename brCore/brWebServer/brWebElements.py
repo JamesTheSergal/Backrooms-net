@@ -4,7 +4,11 @@ from brCore.brEnclave.notrustvars import enclave
 from brCore.loggingfactory import timeProfiler
 from brCore import BR_VERSION
 from brCore.brNodeNet.brNodeNetworkCore import brNodeServer
+from brCore.brNodeNet.brEndpoint import brEndpoint
+from brCore.brNodeNet.events import EndPointEvent, EventType, DHTRequest
+from brCore.brSockets.netconnection import netconnection
 import threading
+import json
 import uuid
 import urllib.parse  # Add this import for parsing form data
 from . import brWebLog
@@ -213,13 +217,6 @@ class brWebUIModule(brWebPage):
         )
         self.setOK()
         return self.buildResponse(context)
-    
-    def clientGetUUID4(self, context: brWebServer.packetParser):
-         self.addContent(
-              str(uuid.uuid4())
-         )
-         self.setOK()
-         return self.buildResponse(context)
 
     def ourPublicKey(self, context: brWebServer.packetParser):
         pubkey = self.secureEnclave.returnData("PublicKey")
@@ -235,10 +232,17 @@ class brWebUIModule(brWebPage):
         webRequests = self.web_server.respondedToRequests
         webErrors = self.web_server.errors
         webConnections = len(self.web_server.connections)
-
+        
         nodeInBytes = 0#self.secureEnclave.returnData("brNodeNetwork_incomingBytes")
         nodeOutBytes = 0#self.secureEnclave.returnData("brNodeNetwork_outgoingBytes")
         nodeRequests = 0#self.secureEnclave.returnData("brNodeNetwork_requests")
+        
+        for route in self.node_server.connection_manager.trackedConnections:
+            route:netconnection
+            nodeOutBytes += route.bytesout
+            nodeInBytes += route.bytesin
+            nodeRequests += route.totalrequests
+
 
         self.addContent(
             genHeader() +
@@ -255,13 +259,214 @@ class brWebUIModule(brWebPage):
                  f'<p>We have handled {humanbytes(nodeInBytes)} In</p>\n' +
                  f'<p>We have handled {humanbytes(nodeOutBytes)} Out</p>\n' +
                  f'<p>We have handled {nodeRequests} Requests</p>\n' +
-                 f'<p>We are apart of {len(self.node_server.routes)} active routes</p>\n'
+                 f'<p>We are apart of {len(self.node_server.router.active_routes)} active routes</p>\n' +
+                 f'<p>We have seen {self.node_server.total_events} node network events</p>\n'
             ) +
             genFooter()
         )
         self.setOK()
         return self.buildResponse(context)
     
+    ###
+    ### Utilities provided by the node to non-browser clients
+    ###
     
+    def clientGetUUID4(self, context: brWebServer.packetParser):
+         self.addContent(
+              str(uuid.uuid4())
+         )
+         self.setOK()
+         return self.buildResponse(context)
+     
+    def getControllerUUID(self, context: brWebServer.packetParser):
+        self.addContent(
+            str(self.node_server.uuid)
+        )
+        self.setOK()
+        return self.buildResponse(context)
     
+    def getDHTPort(self, context: brWebServer.packetParser):
+        self.addContent(
+            str(self.node_server.dht.serverport)
+        )
+        self.setOK()
+        return self.buildResponse(context)
     
+    def getDHTlongID(self, context:brWebServer.packetParser):
+        self.addContent(
+            str(self.node_server.dht.returnDHTLongID())
+        )
+        self.setOK()
+        return self.buildResponse(context)
+    
+    def getDHTNeighborCount(self, context:brWebServer.packetParser):
+        self.addContent(
+            str(len(self.node_server.dht.dhtServer.bootstrappable_neighbors()))
+        )
+        self.setOK()
+        return self.buildResponse(context)
+    
+    def getDHTBootstrappableNeighbors(self, context:brWebServer.packetParser):
+        self.addContent(
+            json.dumps(self.node_server.dht.dhtServer.bootstrappable_neighbors())
+        )
+        self.setOK()
+        return self.buildResponse(context)
+    
+    def getDHTStorageEntryCount(self, context:brWebServer.packetParser):
+        self.addContent(
+            str(len(self.node_server.dht.dhtServer.storage.data))
+        )
+        self.setOK()
+        return self.buildResponse(context)
+    
+    def getNodePort(self, context: brWebServer.packetParser):
+        self.addContent(
+            str(self.node_server.node_port)
+        )
+        self.setOK()
+        return self.buildResponse(context)
+    
+    def getNodeFriends(self, context: brWebServer.packetParser):
+        friends = {"friends": []}
+        for node in self.node_server.knownNodes:
+            formatted_node = {node.localNodeID: {
+                "nodeip": node.nodeIP,
+                "webport": node.webPort,
+                "nodeport": node.nodePort,
+                "friendlyName": node.friendlyName
+            }}
+            friends["friends"].append(formatted_node)
+        self.addContent(
+            json.dumps(friends)
+        )
+        self.setOK()
+        return self.buildResponse(context)
+    
+    def createEndpoint(self, context: brWebServer.packetParser):
+        
+        new_endpoint = brEndpoint() # Create new object for client
+        endpoint_info = {
+            "uuid": str(new_endpoint.endpoint_uuid),
+            "session_token": new_endpoint.session_secret
+        }
+        
+        self.addContent(
+            json.dumps(endpoint_info)
+        )
+        self.setOK()
+        self.node_server.event_queue.put(EndPointEvent(EventType.NEW_ENDPOINT_CLIENT, new_endpoint))
+        
+        return self.buildResponse(context)
+    
+    def listEndpointsOnNode(self, context: brWebServer.packetParser):
+        endpoints = {"endpoints": []}
+        for token in self.node_server.router.active_endpoints.keys():
+            endpoint:brEndpoint = self.node_server.endPoints[token]
+            endpoints["endpoints"].append({
+                "uuid": str(endpoint.endpoint_uuid),
+                "last_seen": endpoint.last_seen,
+            })
+            
+            if endpoint.identity is not None:
+                endpoints["endpoints"].append({
+                    "public_key": endpoint.identity.publicKey.save_pkcs1().decode('utf-8')
+                })
+                
+        endpoint_list = json.dumps(endpoints)
+        self.addContent(endpoint_list)
+        self.setOK()
+        return self.buildResponse(context)
+    
+    def endpointDHTKeyHistory(self, context: brWebServer.packetParser):
+        try:
+            token = context.headers["token"]
+        except KeyError:
+            self.setBadRequest()
+            self.addContent("One or more headers is incorrect")
+            return self.buildResponse(context)
+        
+        if token in self.node_server.endPoints.keys():
+            endpoint:brEndpoint = self.node_server.endPoints[token].seenNow()
+            
+            history = {
+                "get": endpoint.getdhthistory,
+                "set": endpoint.setdhthistory
+            }
+        
+            self.addContent(
+                json.dumps(history)
+            )
+            self.setOK()
+            return self.buildResponse(context)
+        else:
+            self.setNotFound()
+            self.addContent("Token does not exist")
+            return self.buildResponse(context)
+        
+    def endpointDHTAccess(self, context: brWebServer.packetParser):
+        try:
+            token = context.headers["token"]
+            operation = context.headers["operation"]
+            dhtkey = context.headers["dhtkey"]
+        except KeyError:
+            self.setBadRequest()
+            self.addContent("One or more headers is incorrect")
+            return self.buildResponse(context)
+        
+        if token in self.node_server.endPoints.keys():
+            endpoint:brEndpoint = self.node_server.endPoints[token].seenNow()
+            match operation:
+                case "GET":
+                    request_id = str(uuid.uuid4())
+                    self.node_server.dht.get(dhtkey, request_id)
+                    endpoint.add_dht_key_get_history(dhtkey)
+                    self.addContent(str(request_id))
+                    self.setOK()
+                    return self.buildResponse(context)
+                case "SET":
+                    if context.bodyDataLength > 0:
+                        self.node_server.dht.set(dhtkey, context.bodyData.decode("utf-8").lstrip('\r\n'))
+                        endpoint.add_dht_key_set_history(dhtkey)
+                        self.setOK()
+                        return self.buildResponse(context)
+                    else:
+                        self.setBadRequest()
+                        self.addContent("data must be sent in the body of the request")
+                        return self.buildResponse(context)
+                    pass
+                case _:
+                    self.setBadRequest()
+                    self.addContent("operation can only be GET or SET")
+                    return self.buildResponse(context)
+            
+        else:
+            self.setNotFound()
+            self.addContent("Token does not exist")
+            return self.buildResponse(context)
+    
+    def endpointDHTRetreive(self, context: brWebServer.packetParser):
+        try:
+            token = context.headers["token"]
+            request_id = context.headers["request_id"]
+        except KeyError:
+            self.setBadRequest()
+            self.addContent("One or more headers is incorrect")
+            return self.buildResponse(context)
+    
+        if token in self.node_server.endPoints.keys():
+            endpoint:brEndpoint = self.node_server.endPoints[token].seenNow()
+            
+            if request_id in self.node_server.dht.requestresults.keys():
+                self.addContent(self.node_server.dht.requestresults[request_id])
+                self.setOK()
+                return self.buildResponse(context)
+            else:
+                self.setNotFound()
+                self.addContent("dht result was not found or has expired")
+                return self.buildResponse(context)
+        
+        else:
+            self.setNotFound()
+            self.addContent("Token does not exist")
+            return self.buildResponse(context)

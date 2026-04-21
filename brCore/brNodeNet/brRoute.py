@@ -114,6 +114,13 @@ class brRoute:
         """
         logger.debug(f'Handshake with {self.externalNode.nodeIP} complete.')
         self.externalNode.finishedHandshake = True
+        
+    def setBasicHandShakeComplete(self):
+        """
+        Mark the handshake as complete and log the event.
+        """
+        logger.debug(f'Basic handshake with {self.externalNode.nodeIP} complete.')
+        self.externalNode.finishedBasicHandshake = True
 
     def setConnectedState(self, state: bool):
         """

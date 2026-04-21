@@ -29,7 +29,9 @@ def configureUPNP(port:int, protocol:str, description:str):
         local_ip = get_local_ip()
         
         if local_ip:
+            #try:
             result_dht = upnp.addportmapping(port, protocol, local_ip, port, description, '')
+            #except ConflictInMappingEntry
         
             if result_dht:
                 return external_ip
@@ -45,4 +47,4 @@ def removeUPNP(port:int, protocol:str):
         upnp.discover()
         # Select the first IGD found (usually your router)
         upnp.selectigd()
-        upnp.deleteportmapping(port, protocol)
+        upnp.deleteportmapping(port, protocol) # Exception action not authorized
