@@ -1,3 +1,5 @@
+import time
+
 from brCore.brWebServer.brWebCore import brWebServer
 from brCore.brWebServer.brWebCore import brWebPage
 from brCore.brEnclave.notrustvars import enclave
@@ -108,6 +110,36 @@ def genFileForm(postEndpoint, formName, dataName, formButtonText):
         f'<input type="submit" value="{formButtonText}">\n'
         f'</form>\n'
     )
+    return content
+
+def genTable(headers: list, rows: list, caption: str = None):
+    """Generate an HTML table.
+    
+    Args:
+        headers: List of column header strings
+        rows: List of lists (each inner list is a row of cells)
+        caption: Optional table caption/title
+    """
+    content = '<table border="1" cellpadding="6" style="border-collapse: collapse;">\n'
+    
+    if caption:
+        content += f'  <caption><strong>{caption}</strong></caption>\n'
+    
+    # Header row
+    content += '  <thead>\n    <tr>\n'
+    for header in headers:
+        content += f'      <th style="background-color: #f0f0f0; text-align: left;">{header}</th>\n'
+    content += '    </tr>\n  </thead>\n'
+    
+    # Data rows
+    content += '  <tbody>\n'
+    for row in rows:
+        content += '    <tr>\n'
+        for cell in row:
+            content += f'      <td>{cell}</td>\n'
+        content += '    </tr>\n'
+    content += '  </tbody>\n</table>\n'
+    
     return content
 
 class brWebUIModule(brWebPage):
@@ -226,7 +258,43 @@ class brWebUIModule(brWebPage):
         return self.buildResponse(context)
     
     def statsPage(self, context: brWebServer.packetParser):
-
+        
+        node_table_headers = ["Node ID", "IP Address", "Port", "Last Seen"]
+        node_table_data = []
+        
+        for node in self.node_server.knownNodes:
+            new_row = [
+                str(node.localNodeID),
+                node.nodeIP,
+                str(node.nodePort),
+                f'{int((time.time() - node.lastSeen) / 60)} minutes ago'
+            ]
+            node_table_data.append(new_row)
+            
+        route_table_headers = ["Route ID", "Type", "To ID", "From ID"]
+        route_table_data = []
+        
+        for active_route in self.node_server.router.active_routes:
+            new_row = [
+                str(active_route.routeID),
+                str(active_route.routeType.name),
+                str(active_route.connectingTo),
+                str(active_route.connectingFrom)
+            ]
+            route_table_data.append(new_row)
+            
+        endpoint_table_headers = ["Endpoint ID", "Last seen"]
+        endpoint_table_data = []
+        
+        for endpoint_key in self.node_server.router.active_endpoints.keys():
+            active_endpoint:brEndpoint = self.node_server.router.active_endpoints[endpoint_key]
+            new_row = [
+                str(active_endpoint.endpoint_uuid),
+                f'{int((time.time() - active_endpoint.last_seen) / 60)} minutes ago'
+            ]
+            endpoint_table_data.append(new_row)
+        
+        
         webInBytes = self.web_server.handledIncomingBytes
         webOutBytes = self.web_server.handledOutgoingBytes
         webRequests = self.web_server.respondedToRequests
@@ -260,7 +328,14 @@ class brWebUIModule(brWebPage):
                  f'<p>We have handled {humanbytes(nodeOutBytes)} Out</p>\n' +
                  f'<p>We have handled {nodeRequests} Requests</p>\n' +
                  f'<p>We are apart of {len(self.node_server.router.active_routes)} active routes</p>\n' +
-                 f'<p>We have seen {self.node_server.total_events} node network events</p>\n'
+                 f'<p>We have seen {self.node_server.total_events} node network events</p>\n' +
+                 f'<hr />'+
+                 f'<h4>Active Node List</h4>'+
+                 genTable(node_table_headers, node_table_data) +
+                 f'<h4>Active Routes List</h4>' +
+                 genTable(route_table_headers, route_table_data) +
+                 f'<h4>Registered Endpoints</h4>' +
+                 genTable(endpoint_table_headers, endpoint_table_data)
             ) +
             genFooter()
         )
