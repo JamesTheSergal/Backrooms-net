@@ -37,7 +37,7 @@ class brNode:
 
     # For controller
     firstSeen: float = field(default_factory=time.time)
-    lastSeen: float = 0
+    lastSeen: float = field(default_factory=time.time)
     apartOfRoutes:list = field(default_factory=list)
     #recordThreadLock: threading.Lock = field(default_factory=threading.Lock) # Will be removed later. Pickle can't serialize
 
