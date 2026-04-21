@@ -23,7 +23,7 @@ class brEndpoint:
     identity: Identity = None
     session_secret:str = field(default_factory=lambda: secrets.token_urlsafe(32))
     first_seen: float = field(default_factory=time.time)
-    last_seen: float = 0
+    last_seen: float = field(default_factory=time.time)
     getdhthistory: list = field(default_factory=list)
     setdhthistory: list = field(default_factory=list)
     
