@@ -97,15 +97,16 @@ class brPacket:
 
         # Utility
         ASK_FOR_FRIENDS = 7
-        FRIEND_ANNOUNCE = 8
+        FRIEND_ANNOUNCE = 8  # Used to tell other nodes around us who our friends are
         PING = 9
         CALLBACK_PING = 10   # Absolute Solver - Used to provide a window for response
         UR_BEHIND_NAT = 11  # Message type to send when we think a remote node is behind a NAT.
+        NEWS = 12           # News is between controllers for things like disconnections / network events
 
         # Message Handling
-        NEW_MESSAGE = 12    # Packet will contain the number of packets after this one to be received
-        READY_MESSAGE = 13  # Response that we are ready to receive sequence
-        MESSAGE = 14        # Data to receive
+        NEW_MESSAGE = 13    # Packet will contain the number of packets after this one to be received
+        READY_MESSAGE = 14  # Response that we are ready to receive sequence
+        MESSAGE = 15        # Data to receive
         
         
    
