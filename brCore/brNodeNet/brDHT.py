@@ -226,11 +226,62 @@ class brDHTQueryHelper:
     """
 
     def __init__(self, dhtserver:brDHT, enclave:Enclave):
+        self.dht = dhtserver
+        self.enclave = enclave
+        # Access the underlying storage directly
+        self.storage = self.dht.dhtServer.storage
+        
+    def find(self, prefix: str, include_values=True, crawl_neighbors=False):
         """
-        Initialize the DHT query helper.
-
-        Args:
-            dhtserver (brDHT): The running DHT server instance.
-            enclave (Enclave): Enclave for secure operations.
+        Main search method.
+        
+        Returns list of (key, value) tuples.
         """
+        # 1. Local search (fastest)
+        local_results = self.storage.find_by_prefix(prefix) # This will not work. Update later to use .data of ForgetfulStorage kvs
+        
+        if not crawl_neighbors:
+            return local_results if include_values else [(k, None) for k, _ in local_results]
+        
+        # 2. Network expansion - query neighbors for same prefix
+        expanded = self._crawl_neighbors_for_prefix(prefix)
+        combined = {k: v for k, v in local_results}
+        combined.update({k: v for k, v in expanded})
+        
+        return list(combined.items())
+    
+    def _crawl_neighbors_for_prefix(self, prefix: str, max_results=50):
+        """Query known neighbors and bootstrap nodes for matching keys."""
+        results = []
+        seen_keys = set()
+        
+        # Get current routing table neighbors
+        neighbors = self.dht.dhtServer.bootstrappable_neighbors()
+        
+        # Also add bootstrap nodes as fallback
+        for addr in self.dht.bootstraplist:
+            neighbors.append(addr)
+        
+        for node in neighbors[:20]:  # limit fan-out
+            try:
+                # We can't ask for "all keys with prefix", but we *can* try likely keys
+                # or use a secondary index pattern.
+                # For now we query the index keys directly:
+                index_key = f"index:{prefix}"
+                # This is a simplification - in production you might want to derive
+                # several likely index keys based on the Kademlia distance.
+                value = self.dht.dhtServer.get(index_key)
+                if value and isinstance(value, dict) and "ref" in value:
+                    ref = value["ref"]
+                    if ref not in seen_keys:
+                        seen_keys.add(ref)
+                        full_value = self.dht.dhtServer.get(ref)
+                        results.append((ref, full_value))
+            except Exception as e:
+                log.debug(f"Neighbor query failed for {node}: {e}")
+                continue
+                
+        return results[:max_results]
+    
+    def publish(self, key:str, data, typestr:str=None, subtype:str=None):
         pass
