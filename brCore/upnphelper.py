@@ -47,4 +47,4 @@ def removeUPNP(port:int, protocol:str):
         upnp.discover()
         # Select the first IGD found (usually your router)
         upnp.selectigd()
-        upnp.deleteportmapping(port, protocol)
+        upnp.deleteportmapping(port, protocol) # Exception action not authorized
