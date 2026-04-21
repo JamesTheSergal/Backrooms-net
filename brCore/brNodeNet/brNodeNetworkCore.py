@@ -12,7 +12,6 @@ import uuid
 import requests
 from ..upnphelper import configureUPNP, removeUPNP
 from . import brNodeCoreLog
-from .controllerRequest import brControllerRequest
 from brCore.brSockets.brPacket import brPacket
 from brCore.brEnclave.Enclave import Enclave
 from .brNode import brNode
@@ -47,13 +46,14 @@ class brNodeServer:
         self.connection_manager = ConnectionManager(secureEnclave, self.event_queue)
         
         self.knownNodes:list[brNode] = []
-        self.endPoints:dict[str][brEndpoint] = {}
         self.dhtResponses:dict[str][DHTRequest] = {}
-        self.routes = []
         self.router = Router(self.secureEnclave, self.dht, self.event_queue)
         
         self.shutdown = False
         self.controller_thread = None
+        self.total_events = 0
+        
+        self.config = None
         
         # Network controller specific
         self.uuid = None
@@ -78,6 +78,19 @@ class brNodeServer:
         logger.info("Sent shutdown signal - Node Main Thread is now waiting...")
         # Fix this later
         
+    def _debug_event(self, event: NetworkEvent):
+        match event:
+            case NetworkEvent():
+                if event.node is not None:
+                    logger.info(f'EVENT: NETWORK EVENT, NODE-{event.node.localNodeID}, EVENTTYPE: {event.event_type.name}')
+                else:
+                    logger.info(f'EVENT: NETWORK EVENT, NODE-{event.route.routeID}, EVENTTYPE: {event.event_type.name}')
+            case DHTRequest():
+                logger.info(f'EVENT: DHT EVENT, KEY-{event.key}')
+            case EndPointEvent():
+                logger.info(f'EVENT: ENDPOINTEVENT, ID-{event.endPoint.endpoint_uuid}, EVENTTYPE: {event.event_type.name}')
+                
+                
     def _controller_loop(self):
         logger.info("Network controller started")
         self._perform_initial_bootstrapping()
@@ -85,7 +98,9 @@ class brNodeServer:
         while not self.shutdown:
             try:
                 event = self.event_queue.get(timeout=0.3)
+                self._debug_event(event) # Just comment out when not needed
                 self._handle_event(event)
+                self.total_events += 1
             except Empty:
                 self._do_periodic_maintenance()
                 continue
@@ -108,9 +123,13 @@ class brNodeServer:
                         
                     case EventType.SUBMIT_KNOWN_NODE:
                         self.known_nodes.append(event.node)
+
+                    case EventType.BASIC_HANDSHAKE_COMPLETE:
+                        if event.route.externalNode.dhtport != 0:
+                            self.dht.setBootstrapList([(event.route.externalNode.nodeIP, event.route.externalNode.dhtport)])
                         
             case DHTRequest():
-                
+                            
                 self._handle_DHT_response()
             
             case EndPointEvent():
@@ -118,24 +137,32 @@ class brNodeServer:
                 match event.event_type:
                     
                     case EventType.NEW_ENDPOINT_CLIENT:
-                        pass
-                    
-                    case EventType.GET_ENDPOINT_FROM_TOKEN:
-                        pass
+                        self.router.handle_new_endpoint()
                     
                     case EventType.ENDPOINT_REQUESTS_FIND_TARGET:
                         pass
     
     def _perform_initial_bootstrapping(self):
-        try:
-            nodelist:list[brNode] = self.secureEnclave.returnData("knownNodes")
-        except Enclave.enclaveValueDoesNotExist:
-            logger.info("No saved nodes for bootstrap.")
+        
+        # Check enclave for bootstrap Backrooms-net nodes
+        if not self.secureEnclave.isEncKey("knownNodes"):
+            logger.error("No nodes stored in enclave to bootstrap to.")
+        else:
+            logger.info("Bootstrapping the local node with previously known nodes.")
             
+        # Restore the UUID so that other nodes know who we are
         if not self.secureEnclave.isEncKey("selfUUID"):
             self.uuid = uuid.uuid4()
             logger.info(f"Network controller new UUID is: {self.uuid}")
             self.secureEnclave.insertData("selfUUID", self.uuid)
+        else:
+            self.uuid = self.secureEnclave.returnData("selfUUID")
+            
+        # Set basic handshake info object
+        self.config = {"uuid": self.uuid, "dhtport": self.dht.serverport}
+        self.router.config = self.config
+            
+            
     
     def _maintenance_DHT_TTLs(self):
         removed = 0
@@ -156,16 +183,12 @@ class brNodeServer:
     def _handle_new_connection(self, route: brRoute):
         # Decide if we need to run handshake
         if route.connectionType == brRoute.brConnectionDirection.INITIATED:
-            config = {"uuid": self.uuid, "dhtport": self.dht.serverport}
-            brBasicHandshake(route.assignedConn).initiate(config)
+            first_hello = brPacket()
+            first_hello.setMessageType(brPacket.brMessageType.INTRODUCE)
+            self.router._send_to_route(route, first_hello)
         else:
-            config = brBasicHandshake(route.assignedConn).receive()
-            route.externalNode.setNodeUUID(config["uuid"])
-            route.externalNode.dhtport = config["dhtport"]
-        # else the receiver side already did it via the handshake class
-        self.routes.append(route)
-        self.event_queue.put(NetworkEvent(EventType.HANDSHAKE_COMPLETE, route=route))
-    
+            pass
+        
     def _handle_DHT_response(self, response:DHTRequest):
         if response.forController:
             self.dht_queue.put(response)
@@ -173,7 +196,7 @@ class brNodeServer:
             self.dhtResponses[response.request_id] = response
     
     def connect_to_node(self, ip: str, port: int):
-        node = brNode(nodeIP=ip, nodePort=port)
+        node = brNode(nodeIP=ip, nodePort=port, connected=True)
         route = brRoute(
             routeType=brRoute.brRouteType.TEST,
             externalNode=node,
@@ -183,39 +206,6 @@ class brNodeServer:
         # Put the request into the ConnectionManager's dedicated queue
         self.connection_manager.connect_request_queue.put(route)
 
-    def __router__(self):
-        while self.shutdown is False:
-
-            try:
-                job:brControllerRequest = self.socketControl.toRouter.get(block=True, timeout=0.15)
-            except Empty:
-                # This is to be expected a lot
-                job = None
-                time.sleep(0.25)
-
-            if job is not None:
-                match job.controllerRequestType:
-                    
-                    case brControllerRequest.requestType.SUBMIT_KNOWN_NODE:
-                        logger.info(f"Added {job.node.localNodeID} to the known nodes list")
-                        self.knownNodes.append(job.node)
-                #if job.mostRecentPacket is not None:
-                #    if job.mostRecentPacket.messageType is brPacket.brMessageType.INTRODUCE and job.externalNode.finishedUnencryptedHandshake is False:
-                #        job.outbox.put(brPacket().createSimpleReady())
-                #        job.routerPerformedAction()
-                #    if job.mostRecentPacket.messageType is brPacket.brMessageType.READY and job.externalNode.finishedUnencryptedHandshake is False:
-                #        logger.info("Got ready from unknown node, sending config data")
-                #        config = {'uuid': self.uuid, 'dhtport': self.dht.dhtServer.node.port, 'webport': self.webPort}
-                #        configMessage = brPacket().setMessageType(brPacket.brMessageType.NODE_INFO)
-                #        configMessage.insertObject(config)
-                #        job.outbox.put(configMessage.buildPacket())
-                #        job.routerPerformedAction()
-                #    if job.mostRecentPacket.messageType is brPacket.brMessageType.NODE_INFO and job.externalNode.finishedUnencryptedHandshake is False:
-                #        logger.info("Received node info packet from external node")
-                #        configobj = job.mostRecentPacket.rebuildObject()
-                #        job.externalNode.setNodeUUID(configobj['uuid'])
-                #        job.externalNode.dhtport = configobj['dhtport']
-                #        job.externalNode.webPort = configobj['webport']
                     
     def __routerOld__(self):
         if packet.messageType == brPacket.brMessageType.INTRODUCE:
