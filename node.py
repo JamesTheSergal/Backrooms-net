@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 import time
 from brCore import loggingfactory
-from brCore import brWebCore, brNodeNetworkCore, brWebElements, brDHT
+from brCore import brWebCore, brController, brWebElements, brDHT
 from brCore.brWebServer import setup_webserver
 from brCore import brCoreSettings
 from brCore import logLevel
@@ -113,7 +113,7 @@ class brNode:
         self.mainDHT.asyncThread.start()
         
     def startNodeServer(self, brNodeBindAddress:str="0.0.0.0"):
-        self.nodeServer = brNodeNetworkCore.brNodeServer(self.mainEnclave, self.mainDHT)
+        self.nodeServer = brController.brNodeServer(self.mainEnclave, self.mainDHT, self.webPort)
         self.nodeServer.startServer()
         logging.info(f"Node name: {self.friendlyName}")
         
