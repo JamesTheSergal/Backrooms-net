@@ -35,6 +35,8 @@ class Router:
         self.active_routes: list[brRoute] = []
         self.active_endpoints: dict[str][brEndpoint] = {}
         
+        # Non-local record keeping:
+        self.known_endpoints: list[str][brEndpoint] = {}
         logger.info("Router initialized.")
 
     def handle_event(self, event: NetworkEvent):
@@ -224,12 +226,13 @@ class Router:
         ping = brPacket().createCallbackPing()
         self._send_to_route(route, ping, encrypt=False)
 
-    def _start_handshake(self, route: brRoute):
-        """Kick off the handshake sequence for a new outbound route."""
-        hello = brPacket().setMessageType(brPacket.brMessageType.INTRODUCE)
-        hello.setMessageVersion("0.0.1-alpha")  # Use your BR_VERSION
-        self._send_to_route(route, hello, encrypt=False)
-
+    def fetch_all_control_routes(self):
+        to_pass = []
+        for active in self.active_routes:
+            if active.routeType == brRoute.brRouteType.CONTROL:
+                to_pass.append(active)
+        return to_pass
+    
     # ====================== Stub Methods (fill these in) ======================
 
     def _process_introduce(self, route: brRoute, packet: brPacket):
@@ -243,6 +246,7 @@ class Router:
         # Apart of Basic Handshake
         if route.externalNode.finishedBasicHandshake == False:
             self._send_to_route(route, brPacket().createNodeInfo(self.config))
+            
     def _respond_to_challenge(self, route: brRoute, packet: brPacket):
         logger.info("TODO: Implement challenge response")
         
@@ -270,7 +274,6 @@ class Router:
                 route.connectingFrom = f'{route.externalNode.localNodeID}'
                 route.externalNode.finishedBasicHandshake = True
             
-
     def _send_friend_announce(self, route: brRoute):
         logger.info("TODO: Send friend announce packet")
 
@@ -281,3 +284,9 @@ class Router:
         """Called after a ROUTE_UPGRADE_REQUEST event."""
         logger.debug(f"Route {route.routeID} upgraded to {route.routeType.name}")
         # Any post-upgrade logic can go here
+
+    # Route management
+    
+    def make_route_inactive(self, route: brRoute):
+        pass
+    
