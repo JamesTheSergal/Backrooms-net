@@ -39,5 +39,4 @@ class DHTRequest:
 @dataclass
 class EndPointEvent:
     event_type: EventType
-    session_token:str = None
     endPoint: brEndpoint = None
