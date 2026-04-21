@@ -6,6 +6,7 @@ from brCore import BR_VERSION
 from brCore.brNodeNet.brNodeNetworkCore import brNodeServer
 from brCore.brNodeNet.brEndpoint import brEndpoint
 from brCore.brNodeNet.events import EndPointEvent, EventType, DHTRequest
+from brCore.brSockets.netconnection import netconnection
 import threading
 import json
 import uuid
@@ -231,10 +232,17 @@ class brWebUIModule(brWebPage):
         webRequests = self.web_server.respondedToRequests
         webErrors = self.web_server.errors
         webConnections = len(self.web_server.connections)
-
+        
         nodeInBytes = 0#self.secureEnclave.returnData("brNodeNetwork_incomingBytes")
         nodeOutBytes = 0#self.secureEnclave.returnData("brNodeNetwork_outgoingBytes")
         nodeRequests = 0#self.secureEnclave.returnData("brNodeNetwork_requests")
+        
+        for route in self.node_server.connection_manager.trackedConnections:
+            route:netconnection
+            nodeOutBytes += route.bytesout
+            nodeInBytes += route.bytesin
+            nodeRequests += route.totalrequests
+
 
         self.addContent(
             genHeader() +
@@ -251,7 +259,8 @@ class brWebUIModule(brWebPage):
                  f'<p>We have handled {humanbytes(nodeInBytes)} In</p>\n' +
                  f'<p>We have handled {humanbytes(nodeOutBytes)} Out</p>\n' +
                  f'<p>We have handled {nodeRequests} Requests</p>\n' +
-                 f'<p>We are apart of {len(self.node_server.routes)} active routes</p>\n'
+                 f'<p>We are apart of {len(self.node_server.router.active_routes)} active routes</p>\n' +
+                 f'<p>We have seen {self.node_server.total_events} node network events</p>\n'
             ) +
             genFooter()
         )
@@ -329,7 +338,7 @@ class brWebUIModule(brWebPage):
             }}
             friends["friends"].append(formatted_node)
         self.addContent(
-            str(self.node_server.node_port)
+            json.dumps(friends)
         )
         self.setOK()
         return self.buildResponse(context)
@@ -342,17 +351,17 @@ class brWebUIModule(brWebPage):
             "session_token": new_endpoint.session_secret
         }
         
-        self.node_server.endPoints[new_endpoint.session_secret] = new_endpoint
-        
         self.addContent(
             json.dumps(endpoint_info)
         )
         self.setOK()
+        self.node_server.event_queue.put(EndPointEvent(EventType.NEW_ENDPOINT_CLIENT, new_endpoint))
+        
         return self.buildResponse(context)
     
     def listEndpointsOnNode(self, context: brWebServer.packetParser):
         endpoints = {"endpoints": []}
-        for token in self.node_server.endPoints.keys():
+        for token in self.node_server.router.active_endpoints.keys():
             endpoint:brEndpoint = self.node_server.endPoints[token]
             endpoints["endpoints"].append({
                 "uuid": str(endpoint.endpoint_uuid),

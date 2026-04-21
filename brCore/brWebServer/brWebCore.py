@@ -660,10 +660,10 @@ class brWebServer:
         Configures UPNP port forwarding if possible, then launches the main
         listening thread. Sets up default 404 handler if none was provided.
         """
-        result = configureUPNP(self.httpPort, "TCP", "Backrooms-net Web Dashboard")
-        if result is not False:
-            self.externalIP = result
-            logger.info("UPNP configured for Web Server.")
+        #result = configureUPNP(self.httpPort, "TCP", "Backrooms-net Web Dashboard")
+        #if result is not False:
+        #    self.externalIP = result
+        #    logger.info("UPNP configured for Web Server.")
         
         logger.info("Started server.")
         if not self.running:
