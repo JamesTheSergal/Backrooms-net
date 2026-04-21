@@ -39,6 +39,83 @@ def humanbytes(B):
     elif TB <= B:
         return '{0:.2f} TB'.format(B / TB)
 
+def genStyle():
+    """Matrix / cyberpunk dark theme - black background with neon green accents."""
+    return (
+        "<style>\n"
+        "    body {\n"
+        "        background-color: #000000;\n"
+        "        color: #00ff41;\n"
+        "        font-family: 'Courier New', 'Lucida Console', monospace;\n"
+        "        line-height: 1.5;\n"
+        "        margin: 20px;\n"
+        "    }\n"
+        "    h1, h2, h3, h4 {\n"
+        "        color: #00ff41;\n"
+        "        text-shadow: 0 0 10px #00ff41;\n"
+        "    }\n"
+        "    a {\n"
+        "        color: #00ff80;\n"
+        "        text-decoration: none;\n"
+        "        margin-right: 25px;\n"          # ← more spacing
+        "        transition: all 0.2s;\n"
+        "    }\n"
+        "    a:hover {\n"
+        "        color: #00ff41;\n"
+        "        text-shadow: 0 0 15px #00ff41, 0 0 25px #00ff41;\n"
+        "        text-decoration: underline;\n"
+        "        text-underline-offset: 4px;\n"
+        "    }\n"
+        "    hr {\n"
+        "        border: 0;\n"
+        "        height: 2px;\n"
+        "        background: linear-gradient(to right, transparent, #00aa33, transparent);\n"
+        "        margin: 20px 0;\n"
+        "    }\n"
+        "    table {\n"
+        "        border-collapse: collapse;\n"
+        "        width: 100%;\n"
+        "        border: 2px solid #00aa33;\n"
+        "        background-color: #000000;\n"
+        "        box-shadow: 0 0 15px rgba(0, 255, 65, 0.2);\n"
+        "    }\n"
+        "    th, td {\n"
+        "        color: #00ff41 !important;\n"     # ← force green text
+        "        padding: 12px 10px;\n"
+        "        border: 1px solid #003d1f;\n"
+        "    }\n"
+        "    th {\n"
+        "        background-color: #001a00;\n"
+        "        text-shadow: 0 0 8px #00ff41;\n"
+        "        font-weight: bold;\n"
+        "    }\n"
+        "    tr:nth-child(even) {\n"
+        "        background-color: #000f00;\n"
+        "    }\n"
+        "    tr:hover {\n"
+        "        background-color: #002200;\n"
+        "    }\n"
+        "    input, button, textarea {\n"
+        "        background-color: #000000;\n"
+        "        color: #00ff41;\n"
+        "        border: 2px solid #00aa33;\n"
+        "        font-family: 'Courier New', monospace;\n"
+        "        padding: 8px;\n"
+        "    }\n"
+        "    input:focus, button:focus {\n"
+        "        outline: none;\n"
+        "        box-shadow: 0 0 12px #00ff41;\n"
+        "        border-color: #00ff41;\n"
+        "    }\n"
+        "    form {\n"
+        "        margin: 20px 0;\n"
+        "        padding: 15px;\n"
+        "        border: 1px dashed #003d1f;\n"
+        "    }\n"
+        "</style>\n"
+    )
+       
+
 def genHeader():
         content = (
             "<head>\n"
@@ -46,22 +123,20 @@ def genHeader():
             '<meta name="twitter:title" content="Backrooms-net Node">\n'
             '<meta name="twitter:description" content="A secure node based communications network.">\n'
             "</head>\n"
+            + genStyle() +
             "<html>\n"
         )
         return content
 
 def genNavBar(links:dict={}):
     navContent = (
-        "<h1>Hello from the backrooms!&nbsp;</h1>\n" 
-        "<p>\n"
+        "<h1>Hello from the backrooms!</h1>\n"   # removed &nbsp; clutter
+        "<nav style='margin-bottom: 15px;'>\n"   # ← semantic nav + margin
     )
 
     for key in links.keys():
         navContent += f'<a href="{links[key]}">{key}</a>&nbsp;'
-    navContent += "\n"
-    navContent += "</p>\n"
-    navContent += "<hr />\n"
-    
+    navContent += "\n</p>\n<hr />\n"    
     return navContent
      
 def genBody(internalContent):
@@ -120,7 +195,8 @@ def genTable(headers: list, rows: list, caption: str = None):
         rows: List of lists (each inner list is a row of cells)
         caption: Optional table caption/title
     """
-    content = '<table border="1" cellpadding="6" style="border-collapse: collapse;">\n'
+    #content = '<table border="1" cellpadding="6" style="border-collapse: collapse;">\n' # Changed for dark theme
+    content = '<table>\n'
     
     if caption:
         content += f'  <caption><strong>{caption}</strong></caption>\n'
@@ -128,7 +204,8 @@ def genTable(headers: list, rows: list, caption: str = None):
     # Header row
     content += '  <thead>\n    <tr>\n'
     for header in headers:
-        content += f'      <th style="background-color: #f0f0f0; text-align: left;">{header}</th>\n'
+        # For th element: style="background-color: #f0f0f0;
+        content += f'      <th text-align:left;">{header}</th>\n'
     content += '    </tr>\n  </thead>\n'
     
     # Data rows
