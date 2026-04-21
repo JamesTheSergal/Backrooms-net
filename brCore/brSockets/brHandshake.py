@@ -94,13 +94,16 @@ class brBasicHandshake:
         self.validateReady(packet)
         self.con.sendNodeInfo(nodeConfig)
         packet = self.con.receivePacket()
+        self.validateNodeInfo(packet)
+        nodeInfo = packet.rebuildObject()
         self.validateReady(packet)
         self.con.sendReady()
         
         logger.info("Initiated handshake was successful.")
+        return nodeInfo
         
         
-    def receive(self):
+    def receive(self, nodeConfig):
         """
         Perform the server-side handshake reception.
 
@@ -124,6 +127,7 @@ class brBasicHandshake:
         packet = self.con.receivePacket()
         self.validateNodeInfo(packet)
         nodeInfo = packet.rebuildObject()
+        self.con.sendNodeInfo(nodeConfig)
         self.con.sendReady()
         packet = self.con.receivePacket()
         self.validateReady(packet)

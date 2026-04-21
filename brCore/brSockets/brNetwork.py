@@ -6,7 +6,6 @@ from . import brAgentLog
 from ..brNodeNet.brNode import brNode
 from ..brNodeNet.brRoute import brRoute
 from ..brSockets.brPacket import brPacket
-from ..brNodeNet.controllerRequest import brControllerRequest
 from ..brSockets.netconnection import netconnection
 from ..brEnclave.Enclave import Enclave
 from ..brNodeNet.events import NetworkEvent, EventType
@@ -65,7 +64,7 @@ class ConnectionManager:
                 trackconnection = netconnection(connection, ip, port, True, encryptionident=self.secureEnclave.assignedIdentity)
                 self.trackedConnections.append(trackconnection)
                 
-                pendingNode = brNode(ip, port)
+                pendingNode = brNode(ip, port, connected=True)
 
                 pendingRoute = brRoute(routeType=brRoute.brRouteType.TEST,
                                        assignedConn=trackconnection,
@@ -149,6 +148,8 @@ class ConnectionManager:
                 encryptionident=self.secureEnclave.assignedIdentity
             )
             
+            self.trackedConnections.append(route.assignedConn)
+            
             # Start the thin I/O thread (same one used by listener)
             io_thread = threading.Thread(
                 name=f"brNodeCon-outbound-{ip}",
@@ -185,36 +186,43 @@ class ConnectionManager:
     def _connection_io_loop(self, route: brRoute):
         """Thin I/O thread. Only reads, writes, and posts events."""
         conn = route.assignedConn
-        try:
-            while not self.shutdown and route.externalNode.connected:
-                try:
-                    packet = conn.receivePacket()
-                    if packet:
-                        self.event_queue.put(NetworkEvent(
-                            EventType.PACKET_RECEIVED, 
-                            route=route, 
-                            packet=packet
-                        ))
-                except Empty:
-                    continue
-                except Exception as e:
+        logger.info(f"IO thread for route {route.routeID} opened")
+        
+        while not self.shutdown and route.externalNode.connected:
+            try:
+                packet = conn.receivePacket()
+                if packet:
                     self.event_queue.put(NetworkEvent(
-                        EventType.CONNECTION_CLOSED, 
+                        EventType.PACKET_RECEIVED, 
                         route=route, 
-                        error=e
+                        packet=packet
+                    ))
+            except Empty:
+                pass
+            except socket.timeout:
+                pass
+            except Exception as e:
+                self.event_queue.put(NetworkEvent(
+                    EventType.CONNECTION_CLOSED, 
+                    route=route, 
+                    error=e
+                ))
+                break
+
+            # Send anything in the outbox (non-blocking)
+            while not route.outbox.empty():
+                try:
+                    data = route.outbox.get_nowait()
+                    conn.send(data)
+                except:
+                    self.event_queue.put(NetworkEvent(
+                    EventType.CONNECTION_CLOSED, 
+                    route=route, 
+                    error=e
                     ))
                     break
-
-                # Send anything in the outbox (non-blocking)
-                while not route.outbox.empty():
-                    try:
-                        data = route.outbox.get_nowait()
-                        conn.sendall(data)
-                    except:
-                        break
-
-        finally:
-            self.event_queue.put(NetworkEvent(EventType.CONNECTION_CLOSED, route=route))
+        logger.info(f"IO thread for route {route.routeID} closed")
+            
     
     
     def __connectionThread__(self, nodeRoute:brRoute):

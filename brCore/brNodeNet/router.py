@@ -1,10 +1,11 @@
 from queue import Queue
+import time
 from typing import Optional
 from . import brNodeCoreLog
 from .events import NetworkEvent, EventType
 from .brRoute import brRoute
+from .brEndpoint import brEndpoint
 from ..brSockets.brPacket import brPacket
-from .controllerRequest import brControllerRequest
 from ..brEnclave.Enclave import Enclave
 from .brDHT import brDHT
 
@@ -27,10 +28,12 @@ class Router:
         self.secure_enclave = secure_enclave
         self.dht = dht
         self.event_queue = event_queue
+        self.config = None
         
         # You can keep a local reference to active routes, or let the 
         # controller be the source of truth and always pass the route in.
         self.active_routes: list[brRoute] = []
+        self.active_endpoints: dict[str][brEndpoint] = {}
         
         logger.info("Router initialized.")
 
@@ -111,6 +114,12 @@ class Router:
         logger.info(f"Route closed: {route.routeID}")
         # You can notify the controller or save state here if needed
 
+    def handle_new_endpoint(self,endpoint:brEndpoint):
+        if endpoint.session_secret not in self.active_endpoints.keys():
+            self.active_endpoints[endpoint.session_secret] = endpoint
+            
+            logger.info(f"New endpoint established: {endpoint.endpoint_uuid}")
+
     # ====================== Private Handlers ======================
 
     def _handle_handshake_messages(self, route: brRoute, packet: brPacket):
@@ -143,11 +152,31 @@ class Router:
                 self.upgrade_route(route, brRoute.brRouteType.CONTROL)
 
     def _handle_test_route(self, route: brRoute, packet: brPacket):
+        
+        if route.externalNode.finishedBasicHandshake == False:
+             match packet.messageType:
+                case brPacket.brMessageType.INTRODUCE:
+                    self._send_to_route(route, brPacket().createSimpleReady())
+                case brPacket.brMessageType.READY:
+                    self._send_to_route(route, brPacket().createNodeInfo(self.config))
+                case brPacket.brMessageType.NODE_INFO:
+                    config = packet.rebuildObject()
+                    route.externalNode.setNodeUUID(config["uuid"])
+                    route.externalNode.dhtport = config["dhtport"]
+                    self.active_routes.append(route)
+                    if not route.connectionType == brRoute.brConnectionDirection.INITIATED:
+                       self._send_to_route(route, brPacket().createNodeInfo(self.config)) 
+                       
+                    # Set done with basic handshake after node info exchanged on both sides.
+                    route.setBasicHandShakeComplete()
+        
         """Test routes are usually upgraded quickly to CONTROL."""
         if packet.messageType == brPacket.brMessageType.CALLBACK_PING:
-            route.setRouteStateIdle()
-            # Send a ping back or upgrade the route
-            self._send_ping(route)
+            if (time.time() - route.controllerLastSeen) > 5:
+                route.setRouteStateIdle()
+                # Send a ping back or upgrade the route
+                self._send_ping(route)
+                route.controllerLastSeenNow()
         else:
             logger.debug(f"Test route received non-ping message: {packet.messageType}")
 
@@ -193,7 +222,7 @@ class Router:
         """Convenience method to queue a packet for sending."""
         if not route or not route.outbox:
             return False
-            
+        
         data = packet.buildPacket()
         # If encryption logic is needed, do it here or in the connection layer
         route.outbox.put(data)
@@ -214,8 +243,8 @@ class Router:
     # ====================== Stub Methods (fill these in) ======================
 
     def _process_introduce(self, route: brRoute, packet: brPacket):
-        logger.info("TODO: Implement introduce handling")
-        # This is where your old __routerOld__ INTRODUCE logic should go
+        if route.externalNode.finishedBasicHandshake == False:
+            self._send_to_route(route, brPacket().createSimpleReady())
 
     def _respond_to_challenge(self, route: brRoute, packet: brPacket):
         logger.info("TODO: Implement challenge response")
