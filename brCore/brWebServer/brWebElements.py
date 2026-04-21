@@ -5,7 +5,7 @@ from brCore.brWebServer.brWebCore import brWebPage
 from brCore.brEnclave.notrustvars import enclave
 from brCore.loggingfactory import timeProfiler
 from brCore import BR_VERSION
-from brCore.brNodeNet.brNodeNetworkCore import brNodeServer
+from brCore.brNodeNet.brController import brNodeServer
 from brCore.brNodeNet.brEndpoint import brEndpoint
 from brCore.brNodeNet.events import EndPointEvent, EventType, DHTRequest
 from brCore.brSockets.netconnection import netconnection
@@ -152,21 +152,21 @@ class brWebUIModule(brWebPage):
         self.web_server = web_server
         pass
     
-    def insecureAnnounce(self, context: brWebServer.packetParser):
+    def connectnode(self, context: brWebServer.packetParser):
         self.addContent(
             genHeader() +
             genNavBar() +
             genBody(
-                "<h2>Insecure Connection Form</h2>\n" +
+                "<h2>External Node Connection Form</h2>\n" +
                 "<p>Enter the IP address and port to connect to. This data will be stored in the Enclave for later use.</p>\n" +
-                genIPPortForm("/insecureannounce", "IP Address", "ip_address", "Port", "port", "Submit")
+                genIPPortForm("/connectnode", "IP Address", "ip_address", "Port", "port", "Submit")
             ) +
             genFooter()
         )
         self.setOK()
         return self.buildResponse(context)
     
-    def insecureAnnouncePost(self, context: brWebServer.packetParser):
+    def connectnodePost(self, context: brWebServer.packetParser):
         try:
             # Parse the POST body (assumes application/x-www-form-urlencoded)
                                                                          #TODO: BUG. brWebCore post submission logic issue
@@ -222,7 +222,7 @@ class brWebUIModule(brWebPage):
                 genNavBar(
                       {
                         "Our Public Key": "/pubkey",
-                        "Open Insecure Route": "/insecureannounce",
+                        "Connect To Node": "/connectnode",
                         "Open Secure Route": "/announce",
                         "Stats": "/stats",
                       }
