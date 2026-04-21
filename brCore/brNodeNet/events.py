@@ -7,6 +7,8 @@ from .brEndpoint import brEndpoint
 import time
 
 class EventType(IntEnum):
+    
+    # Local events
     CONNECTION_ESTABLISHED = 0
     CONNECTION_CLOSED = 1
     HANDSHAKE_COMPLETE = 2
@@ -14,10 +16,18 @@ class EventType(IntEnum):
     ROUTE_UPGRADE_REQUEST = 4
     SUBMIT_KNOWN_NODE = 5
     DHT_REQUEST = 6
+    
+    # External news triggered
+    PEER_ENDPOINT = 7
+    PEER_NODE = 8
+    
+    # Endpoint stuff
     NEW_ENDPOINT_CLIENT = 100
     ENDPOINT_REQUESTS_FIND_TARGET = 101
     
     # Add more as needed: DHT_BOOTSTRAP_NEEDED, etc.
+
+
 
 @dataclass
 class NetworkEvent:
