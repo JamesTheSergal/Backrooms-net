@@ -1,3 +1,4 @@
+from queue import Queue
 import time
 import uuid
 import secrets
@@ -26,6 +27,8 @@ class brEndpoint:
     last_seen: float = field(default_factory=time.time)
     getdhthistory: list = field(default_factory=list)
     setdhthistory: list = field(default_factory=list)
+    inbox: Queue = field(default_factory=lambda: Queue(maxsize=1000))
+    outbox: Queue = field(default_factory=lambda: Queue(maxsize=1000))
     
     def seenNow(self):
         self.last_seen = time.time()
@@ -33,11 +36,15 @@ class brEndpoint:
     
     def add_dht_key_get_history(self, key):
         if key not in self.getdhthistory:
-            self.getdhthistory.append(key)
+            self.getdhthistory.insert(key)
+            if len(self.getdhthistory) > 100:
+                self.getdhthistory.pop()
     
     def add_dht_key_set_history(self, key):
         if key not in self.setdhthistory:
-            self.getdhthistory.append(key)
+            self.setdhthistory.insert(key)
+            if len(self.setdhthistory) > 100:
+                self.setdhthistory.pop()
             
     def addPublicKey(self, public_key_str):
         self.identity = Identity().newIdentFromPubImport(public_key_str)
