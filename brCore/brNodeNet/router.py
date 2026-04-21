@@ -137,6 +137,9 @@ class Router:
         elif msg_type == brPacket.brMessageType.CHALLENGE:
             self._respond_to_challenge(route, packet)
             
+        elif msg_type == brPacket.brMessageType.READY:
+            self._respond_to_ready(route, packet)
+            
         elif msg_type == brPacket.brMessageType.CHALLENGE_RES:
             self._verify_challenge_response(route, packet)
             
@@ -152,23 +155,6 @@ class Router:
                 self.upgrade_route(route, brRoute.brRouteType.CONTROL)
 
     def _handle_test_route(self, route: brRoute, packet: brPacket):
-        
-        if route.externalNode.finishedBasicHandshake == False:
-             match packet.messageType:
-                case brPacket.brMessageType.INTRODUCE:
-                    self._send_to_route(route, brPacket().createSimpleReady())
-                case brPacket.brMessageType.READY:
-                    self._send_to_route(route, brPacket().createNodeInfo(self.config))
-                case brPacket.brMessageType.NODE_INFO:
-                    config = packet.rebuildObject()
-                    route.externalNode.setNodeUUID(config["uuid"])
-                    route.externalNode.dhtport = config["dhtport"]
-                    self.active_routes.append(route)
-                    if not route.connectionType == brRoute.brConnectionDirection.INITIATED:
-                       self._send_to_route(route, brPacket().createNodeInfo(self.config)) 
-                       
-                    # Set done with basic handshake after node info exchanged on both sides.
-                    route.setBasicHandShakeComplete()
         
         """Test routes are usually upgraded quickly to CONTROL."""
         if packet.messageType == brPacket.brMessageType.CALLBACK_PING:
@@ -223,9 +209,13 @@ class Router:
         if not route or not route.outbox:
             return False
         
-        data = packet.buildPacket()
-        # If encryption logic is needed, do it here or in the connection layer
-        route.outbox.put(data)
+        if isinstance(packet, bytes):
+            logger.warning("Network send - Packet was already bytes when we got it. Make sure the packet is valid.")
+            route.outbox.put(packet)
+        else:
+            data = packet.buildPacket()
+            # If encryption logic is needed, do it here or in the connection layer
+            route.outbox.put(data)
         route.setRouteStateBusy()
         return True
 
@@ -243,9 +233,16 @@ class Router:
     # ====================== Stub Methods (fill these in) ======================
 
     def _process_introduce(self, route: brRoute, packet: brPacket):
+        
+        # Apart of Basic Handshake
         if route.externalNode.finishedBasicHandshake == False:
             self._send_to_route(route, brPacket().createSimpleReady())
 
+    def _respond_to_ready(self, route: brRoute, packet:brPacket):
+        
+        # Apart of Basic Handshake
+        if route.externalNode.finishedBasicHandshake == False:
+            self._send_to_route(route, brPacket().createNodeInfo(self.config))
     def _respond_to_challenge(self, route: brRoute, packet: brPacket):
         logger.info("TODO: Implement challenge response")
         
@@ -254,8 +251,25 @@ class Router:
         # On success, call self.upgrade_route(...)
 
     def _process_node_info(self, route: brRoute, packet: brPacket):
-        logger.info("TODO: Process NODE_INFO packet")
-        # Update route.externalNode with UUID, ports, etc.
+        
+        # Apart of Basic Handshake
+        if route.externalNode.finishedBasicHandshake == False:
+            config = packet.rebuildObject()
+            route.externalNode.setNodeUUID(config["uuid"])
+            route.externalNode.dhtport = config["dhtport"]
+            self.active_routes.append(route)
+            route.setBasicHandShakeComplete()
+            self.event_queue.put(NetworkEvent(EventType.SUBMIT_KNOWN_NODE, route))
+            # Send Node info back to peer to complete handshake on their end.
+            if not route.connectionType == brRoute.brConnectionDirection.INITIATED:
+                route.connectingTo = f'{route.externalNode.localNodeID}'
+                self._send_to_route(route, brPacket().createNodeInfo(self.config))
+                self._send_to_route(route, brPacket().createCallbackPing())
+                route.externalNode.finishedBasicHandshake = True
+            else:
+                route.connectingFrom = f'{route.externalNode.localNodeID}'
+                route.externalNode.finishedBasicHandshake = True
+            
 
     def _send_friend_announce(self, route: brRoute):
         logger.info("TODO: Send friend announce packet")

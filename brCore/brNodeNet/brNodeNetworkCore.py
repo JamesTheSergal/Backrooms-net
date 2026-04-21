@@ -84,7 +84,9 @@ class brNodeServer:
                 if event.node is not None:
                     logger.info(f'EVENT: NETWORK EVENT, NODE-{event.node.localNodeID}, EVENTTYPE: {event.event_type.name}')
                 else:
-                    logger.info(f'EVENT: NETWORK EVENT, NODE-{event.route.routeID}, EVENTTYPE: {event.event_type.name}')
+                    logger.info(f'EVENT: NETWORK EVENT, ROUTE-{event.route.routeID}, EVENTTYPE: {event.event_type.name}')
+                if event.error is not None:
+                    logger.exception("An exception happened during the last Network event.", exc_info=event.error)
             case DHTRequest():
                 logger.info(f'EVENT: DHT EVENT, KEY-{event.key}')
             case EndPointEvent():
@@ -106,41 +108,21 @@ class brNodeServer:
                 continue
     
     def _handle_event(self, event: NetworkEvent):
-        match event:
-            
-            case NetworkEvent():
-                
-                match event.event_type:
-                    
-                    case EventType.CONNECTION_ESTABLISHED:
-                        self._handle_new_connection(event.route)
-                    
-                    case EventType.PACKET_RECEIVED:
-                        self.router.handle_packet(event.route, event.packet)
-                        
-                    case EventType.CONNECTION_CLOSED:
-                        self._handle_disconnect(event.route)
-                        
-                    case EventType.SUBMIT_KNOWN_NODE:
-                        self.known_nodes.append(event.node)
-
-                    case EventType.BASIC_HANDSHAKE_COMPLETE:
-                        if event.route.externalNode.dhtport != 0:
-                            self.dht.setBootstrapList([(event.route.externalNode.nodeIP, event.route.externalNode.dhtport)])
-                        
-            case DHTRequest():
-                            
-                self._handle_DHT_response()
-            
-            case EndPointEvent():
-                
-                match event.event_type:
-                    
-                    case EventType.NEW_ENDPOINT_CLIENT:
-                        self.router.handle_new_endpoint()
-                    
-                    case EventType.ENDPOINT_REQUESTS_FIND_TARGET:
-                        pass
+        
+        if event.event_type == EventType.CONNECTION_ESTABLISHED:
+            self._handle_new_connection(event.route)
+        elif event.event_type == EventType.PACKET_RECEIVED:
+            self.router.handle_packet(event.route, event.packet)
+        elif event.event_type == EventType.CONNECTION_CLOSED:
+            self._handle_disconnect(event.route)
+        elif event.event_type == EventType.SUBMIT_KNOWN_NODE:
+            self.known_nodes.append(event.route.externalNode)
+        elif event.event_type == EventType.NEW_ENDPOINT_CLIENT:
+            self.router.handle_new_endpoint(event.endPoint)
+        elif event.event_type == EventType.ENDPOINT_REQUESTS_FIND_TARGET:
+            pass
+        elif event.event_type == EventType.DHT_REQUEST:
+            self._handle_DHT_response()
     
     def _perform_initial_bootstrapping(self):
         
@@ -162,8 +144,6 @@ class brNodeServer:
         self.config = {"uuid": self.uuid, "dhtport": self.dht.serverport}
         self.router.config = self.config
             
-            
-    
     def _maintenance_DHT_TTLs(self):
         removed = 0
         for key in self.dhtResponses.keys():
@@ -186,8 +166,11 @@ class brNodeServer:
             first_hello = brPacket()
             first_hello.setMessageType(brPacket.brMessageType.INTRODUCE)
             self.router._send_to_route(route, first_hello)
+            route.connectingTo = f'{route.externalNode.localNodeID} (Unconfirmed)'
+            route.connectingFrom = self.uuid
         else:
-            pass
+            route.connectingFrom = self.uuid
+            route.connectingTo = f'{route.externalNode.localNodeID} (Unconfirmed)'
         
     def _handle_DHT_response(self, response:DHTRequest):
         if response.forController:
