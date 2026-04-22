@@ -78,6 +78,9 @@ class brNode:
             logger.error("IP of node not set. Cannot get pubkey. (Check the code)")
             return False
 
+    def identFromPubKey(self, pubkey: str):
+        nodeidentity = Identity().newIdentFromPubImport(pubkey)
+        self.identity = nodeidentity
     
     def setNodeDisconnectedState(self):
         """

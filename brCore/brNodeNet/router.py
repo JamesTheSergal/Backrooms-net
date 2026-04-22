@@ -240,12 +240,16 @@ class Router:
         # Apart of Basic Handshake
         if route.externalNode.finishedBasicHandshake == False:
             self._send_to_route(route, brPacket().createSimpleReady())
+        if route.externalNode.finishedHandshake == False:
+            self._send_to_route(route, brPacket().createSimpleReady())
 
     def _respond_to_ready(self, route: brRoute, packet:brPacket):
         
         # Apart of Basic Handshake
         if route.externalNode.finishedBasicHandshake == False:
             self._send_to_route(route, brPacket().createNodeInfo(self.config))
+        if route.externalNode.finishedHandshake == False:
+            pass
             
     def _respond_to_challenge(self, route: brRoute, packet: brPacket):
         logger.info("TODO: Implement challenge response")
@@ -253,7 +257,14 @@ class Router:
     def _verify_challenge_response(self, route: brRoute, packet: brPacket):
         logger.info("TODO: Implement challenge verification")
         # On success, call self.upgrade_route(...)
-
+        
+    def _deploy_challenge(self, route: brRoute):
+        chunks = self.secure_enclave.assignedIdentity.chunkEncrypt(str(route.routeSecret).encode('utf-8'))
+        reply = brPacket()
+        reply.setMessageType(brPacket.brMessageType.CHALLENGE)
+        reply.data = chunks[0]
+        self._send_to_route(route, reply, True)
+    
     def _process_node_info(self, route: brRoute, packet: brPacket):
         
         # Apart of Basic Handshake
@@ -261,6 +272,7 @@ class Router:
             config = packet.rebuildObject()
             route.externalNode.setNodeUUID(config["uuid"])
             route.externalNode.dhtport = config["dhtport"]
+            route.externalNode.webPort = config["webport"]
             self.active_routes.append(route)
             route.setBasicHandShakeComplete()
             self.event_queue.put(NetworkEvent(EventType.SUBMIT_KNOWN_NODE, route))
@@ -273,6 +285,13 @@ class Router:
             else:
                 route.connectingFrom = f'{route.externalNode.localNodeID}'
                 route.externalNode.finishedBasicHandshake = True
+        if route.externalNode.finishedHandshake == False:
+            if packet.data is not None:
+                data_obj = packet.rebuildObject()
+                if isinstance(data_obj, dict):
+                    if "public_key" in data_obj.keys():
+                        logger.info(f"Attempting to complete encrypted handshake on route: {route.routeID}")
+                        route.externalNode.identity.newIdentFromPubImport(data_obj["public_key"])
             
     def _send_friend_announce(self, route: brRoute):
         logger.info("TODO: Send friend announce packet")
