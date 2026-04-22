@@ -104,6 +104,30 @@ class netconnection:
         self.lastpacket = brPacket(raw)
         return self.lastpacket
     
+    def receivePacketRaw(self) -> bytes:
+        """Receives a single packet from the socket.
+
+        Performs recv(1500), updates bytesin and totalrequests stats,
+        raw bytes, stores as self.lastpacket,
+        and returns it.
+
+        Note:
+            Assumes packets fit in 1500 bytes; no handling for larger or partial reads.
+
+        Returns:
+            bytes: The parsed and validated packet.
+        """
+        self.soc.settimeout(0.25)
+        raw = self.soc.recv(1500)
+        if len(raw) == 0:
+            logger.warning(f"EOF from peer {self.ip}:{self.port} - connection closed")
+            self.close()
+            raise ConnectionError(f"Connection closed by peer {self.ip}:{self.port}")
+        self.bytesin += len(raw)
+        self.totalrequests += 1
+        self.lastpacket = raw
+        return self.lastpacket
+    
     def send(self, packet:bytes):
         """Sends raw packet bytes over the socket.
 

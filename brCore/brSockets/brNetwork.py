@@ -190,7 +190,12 @@ class ConnectionManager:
         
         while not self.shutdown and route.externalNode.connected:
             try:
-                packet = conn.receivePacket()
+                if route.encryptionUpgraded:
+                    packet = conn.receivePacketRaw()
+                    packet = self.secureEnclave.assignedIdentity.decryptChunk(packet)
+                    packet = brPacket(packet)
+                else:
+                    packet = conn.receivePacket()
                 if packet:
                     self.event_queue.put(NetworkEvent(
                         EventType.PACKET_RECEIVED, 
@@ -213,7 +218,11 @@ class ConnectionManager:
             while not route.outbox.empty():
                 try:
                     data = route.outbox.get_nowait()
-                    conn.send(data)
+                    if route.encryptionUpgraded:
+                        data = route.externalNode.identity.chunkEncrypt(data)
+                        conn.send(data[0])
+                    else:
+                        conn.send(data)
                 except:
                     self.event_queue.put(NetworkEvent(
                     EventType.CONNECTION_CLOSED, 
@@ -223,7 +232,9 @@ class ConnectionManager:
                     break
         logger.info(f"IO thread for route {route.routeID} closed")
             
-    
+    def wait_until_outbox_clear(self, route: brRoute):
+        while not route.outbox.empty():
+            time.sleep(0.25)
     
     def __connectionThread__(self, nodeRoute:brRoute):
 

@@ -5,6 +5,7 @@ from . import brNodeCoreLog
 from .events import NetworkEvent, EventType
 from .brRoute import brRoute
 from .brEndpoint import brEndpoint
+from ..brSockets.brNetwork import ConnectionManager
 from ..brSockets.brPacket import brPacket
 from ..brEnclave.Enclave import Enclave
 from .brDHT import brDHT
@@ -24,10 +25,11 @@ class Router:
     NetworkEvent it receives.
     """
     
-    def __init__(self, secure_enclave: Enclave, dht: brDHT, event_queue: Queue):
+    def __init__(self, secure_enclave: Enclave, dht: brDHT, event_queue: Queue, connection_manager: ConnectionManager):
         self.secure_enclave = secure_enclave
         self.dht = dht
         self.event_queue = event_queue
+        self.connection_manager = connection_manager
         self.config = None
         
         # You can keep a local reference to active routes, or let the 
@@ -149,12 +151,16 @@ class Router:
             self._process_node_info(route, packet)
             
         elif msg_type == brPacket.brMessageType.ENCR_COMMS:
-            route.encryptionUpgraded = True
-            route.setHandShakeComplete()
-            logger.info(f"Encryption upgraded on route {route.routeID}")
-            # Optionally upgrade TEST -> CONTROL here
-            if route.routeType == brRoute.brRouteType.TEST:
-                self.upgrade_route(route, brRoute.brRouteType.CONTROL)
+            if route.externalNode.finishedHandshake == False:
+                route.encryptionUpgraded = True
+                route.setHandShakeComplete()
+                reply = brPacket()
+                reply.setMessageType(brPacket.brMessageType.ENCR_COMMS)
+                self._send_to_route(route, reply)
+                logger.info(f"Encryption upgraded on route {route.routeID}")
+                # Optionally upgrade TEST -> CONTROL here
+                if route.routeType == brRoute.brRouteType.TEST:
+                    self.upgrade_route(route, brRoute.brRouteType.CONTROL)
 
     def _handle_test_route(self, route: brRoute, packet: brPacket):
         
@@ -212,7 +218,6 @@ class Router:
             return False
         
         if isinstance(packet, bytes):
-            logger.warning("Network send - Packet was already bytes when we got it. Make sure the packet is valid.")
             route.outbox.put(packet)
         else:
             data = packet.buildPacket()
@@ -233,6 +238,12 @@ class Router:
                 to_pass.append(active)
         return to_pass
     
+    def _send_public_key(self, route):
+        response = brPacket().createNodeInfo(
+                {"public_key": self.secure_enclave.assignedIdentity.publicKey.save_pkcs1().decode("utf-8")}
+            )
+        self._send_to_route(route, response)
+    
     # ====================== Stub Methods (fill these in) ======================
 
     def _process_introduce(self, route: brRoute, packet: brPacket):
@@ -240,30 +251,44 @@ class Router:
         # Apart of Basic Handshake
         if route.externalNode.finishedBasicHandshake == False:
             self._send_to_route(route, brPacket().createSimpleReady())
-        if route.externalNode.finishedHandshake == False:
+        if route.externalNode.finishedBasicHandshake and route.externalNode.finishedHandshake == False:
+            self._send_public_key(route)
             self._send_to_route(route, brPacket().createSimpleReady())
+            self.connection_manager.wait_until_outbox_clear(route)
+            route.encryptionUpgraded = True
+
+            
 
     def _respond_to_ready(self, route: brRoute, packet:brPacket):
         
         # Apart of Basic Handshake
         if route.externalNode.finishedBasicHandshake == False:
             self._send_to_route(route, brPacket().createNodeInfo(self.config))
-        if route.externalNode.finishedHandshake == False:
-            pass
+        if route.externalNode.finishedBasicHandshake and route.externalNode.finishedHandshake == False:
+            self.connection_manager.wait_until_outbox_clear(route)
+            route.encryptionUpgraded = True
+            self._deploy_challenge(route)
             
     def _respond_to_challenge(self, route: brRoute, packet: brPacket):
-        logger.info("TODO: Implement challenge response")
+        challenge_int = packet.rebuildObject()
+        reply = brPacket()
+        reply.setMessageType(brPacket.brMessageType.CHALLENGE_RES)
+        reply.insertObject(challenge_int)
+        self._send_to_route(route, reply)
         
     def _verify_challenge_response(self, route: brRoute, packet: brPacket):
-        logger.info("TODO: Implement challenge verification")
-        # On success, call self.upgrade_route(...)
+        challenge_int = packet.rebuildObject()
+        if challenge_int == route.routeSecret:
+            reply = brPacket()
+            reply.setMessageType(brPacket.brMessageType.ENCR_COMMS)
+            self._send_to_route(route, reply)
+            
         
     def _deploy_challenge(self, route: brRoute):
-        chunks = self.secure_enclave.assignedIdentity.chunkEncrypt(str(route.routeSecret).encode('utf-8'))
         reply = brPacket()
         reply.setMessageType(brPacket.brMessageType.CHALLENGE)
-        reply.data = chunks[0]
-        self._send_to_route(route, reply, True)
+        reply.insertObject(route.routeSecret)
+        self._send_to_route(route, reply)
     
     def _process_node_info(self, route: brRoute, packet: brPacket):
         
@@ -282,16 +307,19 @@ class Router:
                 self._send_to_route(route, brPacket().createNodeInfo(self.config))
                 self._send_to_route(route, brPacket().createCallbackPing())
                 route.externalNode.finishedBasicHandshake = True
+                logger.info(f"Completed basic handshake on route {route.routeID}")
             else:
                 route.connectingFrom = f'{route.externalNode.localNodeID}'
                 route.externalNode.finishedBasicHandshake = True
-        if route.externalNode.finishedHandshake == False:
+                logger.info(f"Completed basic handshake on route {route.routeID}")
+        if route.externalNode.finishedBasicHandshake and route.externalNode.finishedHandshake == False:
             if packet.data is not None:
                 data_obj = packet.rebuildObject()
                 if isinstance(data_obj, dict):
                     if "public_key" in data_obj.keys():
-                        logger.info(f"Attempting to complete encrypted handshake on route: {route.routeID}")
-                        route.externalNode.identity.newIdentFromPubImport(data_obj["public_key"])
+                        logger.info(f"Received public key from {route.externalNode.localNodeID}")
+                        route.externalNode.identity = self.secure_enclave.assignedIdentity.newIdentFromPubImport(data_obj["public_key"])
+                        
             
     def _send_friend_announce(self, route: brRoute):
         logger.info("TODO: Send friend announce packet")
@@ -300,8 +328,16 @@ class Router:
         logger.info("TODO: Process incoming friend announce")
         
     def _perform_route_upgrade(self, route: brRoute):
-        """Called after a ROUTE_UPGRADE_REQUEST event."""
-        logger.debug(f"Route {route.routeID} upgraded to {route.routeType.name}")
+        
+        if route.externalNode.finishedBasicHandshake and not route.externalNode.finishedHandshake and route.connectionType == brRoute.brConnectionDirection.INITIATED:
+            logger.debug(f"Route {route.routeID} upgrade request")
+            self._send_public_key(route)
+            self._send_to_route(route, brPacket().createSimpleHello())
+        elif route.externalNode.finishedBasicHandshake and route.externalNode.finishedHandshake:
+            if route.routeType == brRoute.brRouteType.TEST:
+                route.setRouteType(brRoute.brRouteType.CONTROL)
+            
+            
         # Any post-upgrade logic can go here
 
     # Route management

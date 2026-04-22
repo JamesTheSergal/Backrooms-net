@@ -50,7 +50,7 @@ class brNodeServer:
         
         self.knownNodes:list[brNode] = []
         self.dhtResponses:dict[str][DHTRequest] = {}
-        self.router = Router(self.secureEnclave, self.dht, self.event_queue)
+        self.router = Router(self.secureEnclave, self.dht, self.event_queue, self.connection_manager)
         
         self.shutdown = False
         self.controller_thread = None
@@ -162,7 +162,8 @@ class brNodeServer:
     
     def _submit_known_node(self, route:brRoute):
         self.knownNodes.append(route.externalNode)
-        if self.knownNodes > 0 and len(self.dht.dhtServer.bootstrappable_neighbors()) == 0:
+        self.router._perform_route_upgrade(route)
+        if len(self.knownNodes) > 0 and len(self.dht.dhtServer.bootstrappable_neighbors()) == 0:
             self.dht.setBootstrapList([(route.externalNode.nodeIP, route.externalNode.dhtport)])
             logging.info("Just bootstrapped the DHT network.")
     

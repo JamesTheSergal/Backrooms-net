@@ -169,7 +169,7 @@ class brRoute:
             brtype (brRouteType): New route type.
         """
         self.routeType = brtype
-        self.controllerLastSeen = 0
+        self.controllerLastSeen = time.time()
     
     def controllerLastSeenNow(self):
         """
@@ -201,6 +201,13 @@ class brRoute:
                 'timeToLive': self.timeToLive,
                 'routeState': self.routeState}
         return (key, data)
+    
+    def setRouteSecret(self, secret:int):
+        logger.info(f'Setting route secret for {self.routeID} - both nodes should match')
+        self.routeSecret = secret
+        
+    def setRouteType(self, newType:brRouteType):
+        logger.info(f'Route {self.routeID} upgraded to {self.routeType.name}')
     
     def __getstate__(self):
         """
