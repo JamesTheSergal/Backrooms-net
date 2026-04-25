@@ -202,6 +202,7 @@ class ConnectionManager:
                         route=route, 
                         packet=packet
                     ))
+                route.controllerLastSeenNow()
             except Empty:
                 pass
             except socket.timeout:
@@ -236,112 +237,5 @@ class ConnectionManager:
         while not route.outbox.empty():
             time.sleep(0.25)
     
-    def __connectionThread__(self, nodeRoute:brRoute):
 
-        if nodeRoute.connectionType is brRoute.brConnectionDirection.INITIATED:
-            nodeConfig = {"uuid": self.secureEnclave.returnData("selfUUID"), "webport":self.secureEnclave.returnData("webPort"), "dhtPort":self.secureEnclave.returnData("dhtPort")}
-            brBasicHandshake(nodeRoute.assignedConn).initiate(nodeConfig) # TODO: add connectionreseterror exception
-            nodeRoute.externalPubKeyCheck()
-            self.toRouter.put(brControllerRequest(brControllerRequest.requestType.SUBMIT_KNOWN_NODE, nodeRoute.externalNode))
-        else:
-            nodeConfig = brBasicHandshake(nodeRoute.assignedConn).receive()
-            nodeRoute.externalNode.setNodeUUID(nodeConfig["uuid"])
-            nodeRoute.externalNode.webPort = nodeConfig["webport"]
-            nodeRoute.externalNode.dhtport = nodeConfig["dhtPort"]
-            nodeRoute.externalPubKeyCheck()
-            self.toRouter.put(brControllerRequest(brControllerRequest.requestType.SUBMIT_KNOWN_NODE, nodeRoute.externalNode))
-        
-        # START OF CONTINUOUS LOOP
-        #
-        #
-        #
-        
-        nodeRoute.setConnectedState(True)
-        con = nodeRoute.assignedConn
-        
-        while not self.shutdown:
-
-            # Receive action
-            try:
-                packet = con.receivePacket()
-            except:
-                logger.exception("Critical error when receiving data!", exc_info=True)
-                break
-
-            
-            # Decision making / Send to Controller for more data
-            
-            # Decision table
-            connected = nodeRoute.externalNode.connected
-            fullHandshake = nodeRoute.externalNode.finishedHandshake
-  
-            # if conditions are met, send to router 
-            
-            match packet.messageType:
-                
-                case brPacket.brMessageType.CALLBACK_PING:
-                    # We are currently IDLE
-                    nodeRoute.setRouteStateIdle()
-                    time.sleep(1)
-                    con.sendPing()
-                    with self.statsLock:
-                        self.respondedToRequests += con.requeststatupdate()
-                        self.handledIncomingBytes += con.instatupdate()
-                        self.handledOutgoingBytes += con.outstatupdate()
-            
-            
-            #if reply == False:
-            #    logger.error("Got a false return from the router. Something went wrong. Exiting.")
-            #    connection.close()
-            #    break
-            #elif reply == True:
-            #    nodeRoute.setRouteStateIdle()
-            #    # We have time to look for messages and news
-            #    
-            #    
-            #    packet = brPacket().createCallbackPing()
-            #    reply = nodeRoute.thirdParty.identity.chunkEncrypt(packet)[0]
-            #    time.sleep(0.5)
-            #else:
-            #    nodeRoute.setRouteStateBusy()
-            #    if nodeRoute.encryptionUpgraded:
-            #        reply = nodeRoute.thirdParty.identity.chunkEncrypt(reply)[0]
-            #    
-            #    # Last step of the handshake process. Makes sure that the packet goes out without being encrypted
-            #    if nodeRoute.thirdParty.finishedHandshake == True and nodeRoute.encryptionUpgraded == False:
-            #        with nodeRoute.routeThreadLock:
-            #            nodeRoute.encryptionUpgraded = True
-
-            #ourOutgoingBytes += len(reply)
-            #connection.sendall(reply)
-                
-            # If our route was Idle, send our stats really quick
-            #if nodeRoute.routeState == "Idle":
-            #    with self.statsLock:
-            #        self.handledIncomingBytes += ourHandledBytes
-            #        self.handledOutgoingBytes += ourOutgoingBytes
-            #        self.respondedToRequests += ourHandledRequests
-            #        ourHandledBytes = 0
-            #        ourOutgoingBytes = 0
-            #        ourHandledRequests = 0
-            
-
-        
-        # We broke out, find out why!
-        if self.shutdown:
-            logger.info("Thread got shutdown signal.")
-            nodeRoute.setConnectedState(False)
-            con.close()
-        else:
-            logger.info(f'Thread abnormal shutdown.')
-            #nodeRoute.setConnectedState(False)
-            con.close()
-
-        
-        # Publish our stats really quick
-        #with self.statsLock:
-        #    self.handledIncomingBytes += ourHandledBytes
-        #    self.handledOutgoingBytes += ourOutgoingBytes
-        #    self.respondedToRequests += ourHandledRequests
-    
     
