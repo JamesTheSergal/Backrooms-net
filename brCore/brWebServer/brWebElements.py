@@ -366,8 +366,8 @@ class brWebUIModule(brWebPage):
             new_row = [
                 str(active_route.routeID),
                 str(active_route.routeType.name),
-                str(active_route.connectingFrom),
-                str(active_route.connectingTo)
+                str(active_route.originID),
+                str(active_route.destinationID)
             ]
             route_table_data.append(new_row)
             

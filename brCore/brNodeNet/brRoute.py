@@ -58,8 +58,8 @@ class brRoute:
     assignedConn: netconnection = None
     routeID: uuid.UUID = field(default_factory=uuid.uuid4)
     routeSecret: int = field(default_factory=lambda: random.randrange(0, 1000000))
-    connectingFrom: str = None
-    connectingTo: str = None
+    originID: str = None
+    destinationID: str = None
     #routeThreadLock: threading.Lock = field(default_factory=threading.Lock) # Will be removed later. Pickle can't serialize
     timeToLive: int = 0
     controllerLastSeen: float = field(default_factory=time.time)
@@ -195,8 +195,8 @@ class brRoute:
         """
         key = f'{self.routeID}_route'
         data = {'routeType': self.routeType,
-                'connectingFrom': self.connectingFrom,
-                'connectingTo': self.connectingTo,
+                'origin': self.originID,
+                'destination': self.destinationID,
                 'externalNode': self.externalNode.localNodeID,
                 'timeToLive': self.timeToLive,
                 'routeState': self.routeState}
@@ -209,11 +209,16 @@ class brRoute:
     def setRouteType(self, newType:brRouteType):
         logger.info(f'Route {self.routeID} upgraded to {self.routeType.name}')
     
-    def setDestinations(self, destination:str, origin:str):
-        self.connectingTo = destination
-        self.connectingFrom = origin
-        logger.info(f'Route {self.routeID} - {self.connectingFrom} ->> {self.connectingTo}')
-        
+    def setDestinations(self, destination:str=None, origin:str=None):
+        if destination is not None:
+            self.destinationID = destination
+        if origin is not None:
+            self.originID = origin
+        logger.info(f'Route {self.routeID} - {self.originID} ->> {self.destinationID}')
+    
+    def setExternalNodeID(self, uuid:str):
+        self.externalNode.setNodeUUID(uuid)
+    
     def __getstate__(self):
         """
         Custom __getstate__ for pickling.

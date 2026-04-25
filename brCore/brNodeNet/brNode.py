@@ -96,7 +96,7 @@ class brNode:
         return self
     
     
-    def setNodeUUID(self, newuuid):
+    def setNodeUUID(self, newuuid:str):
         """
         Changes the local node ID to a new UUID value.
 
@@ -107,7 +107,7 @@ class brNode:
             Logs the ID change from old to new.
         """
         logger.info(f"Changing node id from {self.localNodeID} to {newuuid}")
-        self.localNodeID = newuuid
+        self.localNodeID = uuid.UUID(str(newuuid))
         
     
     def makeDHTAnnounceDict(self, controllerID):
