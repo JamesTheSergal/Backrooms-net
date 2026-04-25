@@ -293,6 +293,11 @@ class brWebUIModule(brWebPage):
         return self.buildResponse(context)
 
     def brUIRoot(self, context: brWebServer.packetParser):
+        ip = self.node_server.externalIP
+        port = self.node_server.node_port
+        endpoints = len(self.node_server.router.active_endpoints)
+        routes = len(self.node_server.router.active_routes)
+        
         self.addContent(
             genHeader() +
             genBody(
@@ -304,7 +309,13 @@ class brWebUIModule(brWebPage):
                         "Stats": "/stats",
                       }
                 ) +
-                f'Welcome to the backrooms!\n'
+                f'Welcome to the backrooms!\n' +
+                f'<hr />'+
+                f'<h4>Node Information</h4>'+
+                f'<p>External IP:{ip}</p>\n' +
+                f'<p>Node port:{port}</p>\n' +
+                f'<p>Number of endpoints:{endpoints}</p>\n' +
+                f'<p>Number of routes:{routes}</p>\n' 
             ) +
             genFooter()
         )
@@ -339,24 +350,24 @@ class brWebUIModule(brWebPage):
         node_table_headers = ["Node ID", "IP Address", "Port", "Last Seen"]
         node_table_data = []
         
-        for node in self.node_server.knownNodes:
+        for node in self.node_server.knownNodes:            
             new_row = [
-                str(node.localNodeID),
+                f'<a href="http://{node.nodeIP}:{node.webPort}">{str(node.localNodeID)}</a>',
                 node.nodeIP,
                 str(node.nodePort),
                 f'{int((time.time() - node.lastSeen) / 60)} minutes ago'
             ]
             node_table_data.append(new_row)
             
-        route_table_headers = ["Route ID", "Type", "To ID", "From ID"]
+        route_table_headers = ["Route ID", "Type", "From ID", "To ID"]
         route_table_data = []
         
         for active_route in self.node_server.router.active_routes:
             new_row = [
                 str(active_route.routeID),
                 str(active_route.routeType.name),
-                str(active_route.connectingTo),
-                str(active_route.connectingFrom)
+                str(active_route.connectingFrom),
+                str(active_route.connectingTo)
             ]
             route_table_data.append(new_row)
             
