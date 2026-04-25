@@ -270,7 +270,7 @@ class brPacket:
         Returns:
             bytes: Ready-to-send packet.
         """
-        return self.buildPacket(brPacket.brMessageType.INTRODUCE)
+        return self.setMessageType(brPacket.brMessageType.INTRODUCE)
     
     
     def createSimpleReady(self):
@@ -279,7 +279,15 @@ class brPacket:
         Returns:
             bytes: Ready-to-send packet.
         """
-        return self.buildPacket(brPacket.brMessageType.READY)
+        return self.setMessageType(brPacket.brMessageType.READY)
+    
+    def createEncrComms(self):
+        """Build empty READY packet to acknowledge handshake.
+
+        Returns:
+            bytes: Ready-to-send packet.
+        """
+        return self.setMessageType(brPacket.brMessageType.ENCR_COMMS)
     
     
     def createCallbackPing(self):
@@ -288,7 +296,7 @@ class brPacket:
         Returns:
             bytes: Ready-to-send packet.
         """
-        return self.buildPacket(brPacket.brMessageType.CALLBACK_PING)
+        return self.setMessageType(brPacket.brMessageType.CALLBACK_PING)
     
     
     def createNodeInfo(self, message):
@@ -300,4 +308,4 @@ class brPacket:
         Returns:
             bytes: Ready-to-send packet.
         """
-        return self.insertObject(message).buildPacket(brPacket.brMessageType.NODE_INFO)
+        return self.insertObject(message).setMessageType(brPacket.brMessageType.NODE_INFO)
