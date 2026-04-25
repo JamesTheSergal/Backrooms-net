@@ -6,3 +6,4 @@ kademlia==2.2.3
 names-generator==0.2.0
 miniupnpc==2.3.3
 py-natpmp==0.2.5
+schedule==1.2.2

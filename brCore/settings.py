@@ -20,7 +20,7 @@ class brSettings():
 
             settings['network'] = {
                 'bind-address': '127.0.0.1',
-                'webresponder-port': 23332,
+                'webresponder-port': 11000,
                 'brNode-port': 23334,
                 'brDHT-port': 23338,
                 'friendly-node-name': generate_name(style="underscore")
