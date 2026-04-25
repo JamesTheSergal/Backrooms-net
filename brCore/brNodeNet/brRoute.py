@@ -62,7 +62,7 @@ class brRoute:
     connectingTo: str = None
     #routeThreadLock: threading.Lock = field(default_factory=threading.Lock) # Will be removed later. Pickle can't serialize
     timeToLive: int = 0
-    controllerLastSeen: float = 0
+    controllerLastSeen: float = field(default_factory=time.time)
     encryptionUpgraded: bool = False
     routerAction: bool = False
     connectionFailed: bool = False
@@ -209,6 +209,11 @@ class brRoute:
     def setRouteType(self, newType:brRouteType):
         logger.info(f'Route {self.routeID} upgraded to {self.routeType.name}')
     
+    def setDestinations(self, destination:str, origin:str):
+        self.connectingTo = destination
+        self.connectingFrom = origin
+        logger.info(f'Route {self.routeID} - {self.connectingFrom} ->> {self.connectingTo}')
+        
     def __getstate__(self):
         """
         Custom __getstate__ for pickling.

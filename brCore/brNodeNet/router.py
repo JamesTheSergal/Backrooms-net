@@ -238,11 +238,25 @@ class Router:
                 to_pass.append(active)
         return to_pass
     
+    def fetch_all_test_routes(self):
+        to_pass = []
+        for active in self.active_routes:
+            if active.routeType == brRoute.brRouteType.TEST:
+                to_pass.append(active)
+        return to_pass
+    
     def _send_public_key(self, route):
         response = brPacket().createNodeInfo(
                 {"public_key": self.secure_enclave.assignedIdentity.publicKey.save_pkcs1().decode("utf-8")}
             )
         self._send_to_route(route, response)
+    
+    def _apply_config_to_route(self, config:dict, route:brRoute):
+        route.externalNode.setNodeUUID(config["uuid"])
+        route.externalNode.dhtport = config["dhtport"]
+        route.externalNode.webPort = config["webport"]
+        route.externalNode.nodePort = config["nodeport"]
+
     
     # ====================== Stub Methods (fill these in) ======================
 
@@ -256,8 +270,6 @@ class Router:
             self._send_to_route(route, brPacket().createSimpleReady())
             self.connection_manager.wait_until_outbox_clear(route)
             route.encryptionUpgraded = True
-
-            
 
     def _respond_to_ready(self, route: brRoute, packet:brPacket):
         
@@ -282,8 +294,7 @@ class Router:
             reply = brPacket()
             reply.setMessageType(brPacket.brMessageType.ENCR_COMMS)
             self._send_to_route(route, reply)
-            
-        
+               
     def _deploy_challenge(self, route: brRoute):
         reply = brPacket()
         reply.setMessageType(brPacket.brMessageType.CHALLENGE)
@@ -295,23 +306,22 @@ class Router:
         # Apart of Basic Handshake
         if route.externalNode.finishedBasicHandshake == False:
             config = packet.rebuildObject()
-            route.externalNode.setNodeUUID(config["uuid"])
-            route.externalNode.dhtport = config["dhtport"]
-            route.externalNode.webPort = config["webport"]
+            self._apply_config_to_route(config, route)
             self.active_routes.append(route)
             route.setBasicHandShakeComplete()
-            self.event_queue.put(NetworkEvent(EventType.SUBMIT_KNOWN_NODE, route))
             # Send Node info back to peer to complete handshake on their end.
             if not route.connectionType == brRoute.brConnectionDirection.INITIATED:
                 route.connectingTo = f'{route.externalNode.localNodeID}'
                 self._send_to_route(route, brPacket().createNodeInfo(self.config))
-                self._send_to_route(route, brPacket().createCallbackPing())
                 route.externalNode.finishedBasicHandshake = True
                 logger.info(f"Completed basic handshake on route {route.routeID}")
             else:
                 route.connectingFrom = f'{route.externalNode.localNodeID}'
                 route.externalNode.finishedBasicHandshake = True
                 logger.info(f"Completed basic handshake on route {route.routeID}")
+                
+            self.event_queue.put(NetworkEvent(EventType.SUBMIT_KNOWN_NODE, route))
+            
         if route.externalNode.finishedBasicHandshake and route.externalNode.finishedHandshake == False:
             if packet.data is not None:
                 data_obj = packet.rebuildObject()
@@ -329,8 +339,8 @@ class Router:
         
     def _perform_route_upgrade(self, route: brRoute):
         
-        if route.externalNode.finishedBasicHandshake and not route.externalNode.finishedHandshake and route.connectionType == brRoute.brConnectionDirection.INITIATED:
-            logger.debug(f"Route {route.routeID} upgrade request")
+        if route.externalNode.finishedBasicHandshake and route.externalNode.finishedHandshake == False and route.connectionType == brRoute.brConnectionDirection.INITIATED:
+            logger.info(f"Route {route.routeID} upgrade request")
             self._send_public_key(route)
             self._send_to_route(route, brPacket().createSimpleHello())
         elif route.externalNode.finishedBasicHandshake and route.externalNode.finishedHandshake:
