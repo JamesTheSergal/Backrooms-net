@@ -1,5 +1,6 @@
 import logging
 import time
+from dataclasses import dataclass
 
 def setDefault(logpath:str=""):
     logging.basicConfig(
@@ -49,14 +50,22 @@ class timeProfiler:
 
     def __init__(self, name) -> None:
         self.name = name
-        self.a = 0
-        self.b = 0
-        self.logger = createNewLogger(name+"_timeProfiler", "./temp/")
 
-    def s(self):
-        self.a = time.time()
+    def timeindex():
+      # Time in milliseconds
+      return int(time.time() * 1000)
 
-    def e(self):
-        self.b = time.time()
-        diff = round(int(self.b * 1000) - int(self.a * 1000), 2)
-        self.logger.debug(f'{self.name} took {diff}ms')
+    def difference(first, last):
+        return last - first
+
+    def deltaCheck(self, timestamp: int, offset: int):
+        if self.timeindex() < (timestamp+offset):
+            return True
+        else:
+            return False
+
+    def reportPrecisionTime(self, func):
+        def inner(name:str):
+            start = self.timeindex()
+            func()
+            end = self.timeindex()
