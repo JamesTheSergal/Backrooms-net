@@ -50,3 +50,4 @@ class DHTRequest:
 class EndPointEvent:
     event_type: EventType
     endPoint: brEndpoint = None
+    

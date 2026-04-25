@@ -166,6 +166,10 @@ class ConnectionManager:
                 route=route
             ))
             
+            if route.destinationID is not None:
+                dest_packet = brPacket().createPredeturminedDestination(str(route.destinationID))
+                route.outbox.put(dest_packet)
+            
             logger.info(f"Successfully connected to {ip}:{port}")
             
         except ConnectionRefusedError:

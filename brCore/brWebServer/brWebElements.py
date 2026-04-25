@@ -492,7 +492,7 @@ class brWebUIModule(brWebPage):
     
     def getNodeFriends(self, context: brWebServer.packetParser):
         friends = {"friends": []}
-        for node in self.node_server.knownNodes:
+        for node in self.node_server.activeNodes:
             formatted_node = {node.localNodeID: {
                 "nodeip": node.nodeIP,
                 "webport": node.webPort,
@@ -521,6 +521,10 @@ class brWebUIModule(brWebPage):
         self.node_server.event_queue.put(EndPointEvent(EventType.NEW_ENDPOINT_CLIENT, new_endpoint))
         
         return self.buildResponse(context)
+        
+    ###
+    ### Endpoint Utilities
+    ###
     
     def listEndpointsOnNode(self, context: brWebServer.packetParser):
         endpoints = {"endpoints": []}
@@ -628,6 +632,26 @@ class brWebUIModule(brWebPage):
                 self.setNotFound()
                 self.addContent("dht result was not found or has expired")
                 return self.buildResponse(context)
+        
+        else:
+            self.setNotFound()
+            self.addContent("Token does not exist")
+            return self.buildResponse(context)
+        
+    def endpointRequestRoute(self, context: brWebServer.packetParser):
+        try:
+            token = context.headers["token"]
+            target = context.headers["target_endpoint"]
+        except KeyError:
+            self.setBadRequest()
+            self.addContent("One or more headers is incorrect")
+            return self.buildResponse(context)
+    
+        if token in self.node_server.endPoints.keys():
+            endpoint:brEndpoint = self.node_server.endPoints[token].seenNow()
+            
+            endpoint.requestTarget(target)
+            self.node_server.event_queue.put(EndPointEvent(EventType.ENDPOINT_REQUEST, endpoint))
         
         else:
             self.setNotFound()

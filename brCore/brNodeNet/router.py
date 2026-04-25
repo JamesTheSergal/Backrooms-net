@@ -37,9 +37,13 @@ class Router:
         # controller be the source of truth and always pass the route in.
         self.active_routes: list[brRoute] = []
         self.active_endpoints: dict[str][brEndpoint] = {}
+        self.suggested_connections: list[tuple] = []
+        
+        # Reserved Routes
+        self.reserved_routes: dict[str][brRoute] = {} # Dest ID and route
         
         # Non-local record keeping:
-        self.known_endpoints: list[str][brEndpoint] = {}
+        self.known_endpoints: dict[str][str] = {} # UUID of node and UUID of endpoint
         logger.info("Router initialized.")
 
     def handle_event(self, event: NetworkEvent):
@@ -63,6 +67,14 @@ class Router:
 
         logger.debug(f"Router handling {packet.messageType.name} on "
                     f"route {route.routeID} (type: {route.routeType.name})")
+        
+        # === Check to see if the message indicated it is a reserved connection ===
+        if packet.messageType in (
+            brPacket.brMessageType.SET_DESTINATION,
+        ):
+            dest_id = packet.rebuildObject()
+            self.reserved_routes[dest_id] = route
+            logger.info(f"Created reserved route {route.routeID} going to {dest_id}")
 
         # === Universal control/handshake messages (all route types) ===
         if packet.messageType in (
@@ -127,6 +139,7 @@ class Router:
         if endpoint.session_secret not in self.active_endpoints.keys():
             self.active_endpoints[endpoint.session_secret] = endpoint
             logger.info(f"New endpoint established: {endpoint.endpoint_uuid}")
+            self._broadcast_new_endpoint(endpoint)
 
     # ====================== Private Handlers ======================
 
@@ -193,6 +206,8 @@ class Router:
             self._process_friend_announce(route, packet)
         elif packet.messageType == brPacket.brMessageType.CALLBACK_PING:
             pass
+        elif packet.messageType == brPacket.brMessageType.NEWS:
+            self._process_control_news(route, packet)
         # Add more control message types here
 
     def _handle_unencrypted_route(self, route: brRoute, packet: brPacket):
@@ -221,7 +236,6 @@ class Router:
             logger.info(f"Route ID {route.routeID} changed from {route.routeType.name} to {new_type.name}")
             route.routeType = new_type
             
-
     def _send_to_route(self, route: brRoute, packet: brPacket):
         """Convenience method to queue a packet for sending."""
         if isinstance(packet, bytes):
@@ -233,19 +247,23 @@ class Router:
         route.setRouteStateBusy()
         return True
 
+    def _broadcast_to_routes(self, routes:list[brRoute], packet):
+        for route in routes:
+            self._send_to_route(route, packet)
+    
     def _send_ping(self, route: brRoute):
         """Helper to send a callback ping."""
         ping = brPacket().createCallbackPing()
         self._send_to_route(route, ping)
 
-    def fetch_all_control_routes(self):
+    def fetch_all_control_routes(self) -> list[brRoute]:
         to_pass = []
         for active in self.active_routes:
             if active.routeType == brRoute.brRouteType.CONTROL:
                 to_pass.append(active)
         return to_pass
     
-    def fetch_all_test_routes(self):
+    def fetch_all_test_routes(self) -> list[brRoute]:
         to_pass = []
         for active in self.active_routes:
             if active.routeType == brRoute.brRouteType.TEST:
@@ -276,6 +294,19 @@ class Router:
         route.externalNode.webPort = config["webport"]
         route.externalNode.nodePort = config["nodeport"]
 
+    # ====================== Helper Endpoint methods ======================
+    
+    def isEndpointTargetLocal(self, endpointid):
+        for secret in self.active_endpoints.keys():
+            if self.active_endpoints[secret] == endpointid:
+                return True
+        return False
+    
+    def isEndpointTargetClose(self, endpointid):
+        for nodeid in self.known_endpoints.keys():
+            if self.known_endpoints[nodeid] == endpointid:
+                return nodeid
+        return None
     
     # ====================== Main Handshake ======================
 
@@ -319,13 +350,7 @@ class Router:
             if isinstance(data_obj, dict):
                 if "public_key" in data_obj.keys():
                     logger.info(f"Received public key from {route.externalNode.localNodeID}")
-                    route.externalNode.identity = self.secure_enclave.assignedIdentity.newIdentFromPubImport(data_obj["public_key"])
-                                 
-    def _send_friend_announce(self, route: brRoute):
-        logger.info("TODO: Send friend announce packet")
-
-    def _process_friend_announce(self, route: brRoute, packet: brPacket):
-        logger.info("TODO: Process incoming friend announce")           
+                    route.externalNode.identity = self.secure_enclave.assignedIdentity.newIdentFromPubImport(data_obj["public_key"])                                 
     
     def _encrypt_comms(self, route: brRoute):
         route.encryptionUpgraded = True
@@ -336,7 +361,6 @@ class Router:
         # Optionally upgrade TEST -> CONTROL here
         self.upgrade_route(route, brRoute.brRouteType.CONTROL)
         
-
    # ====================== Route Management ======================
     
     def add_active_route(self, route: brRoute):
@@ -353,13 +377,11 @@ class Router:
     def _process_basic_introduce(self, route: brRoute, packet: brPacket):
 
         self._send_to_route(route, brPacket().createSimpleReady())
-
-            
+         
     def _respond_to_basic_ready(self, route: brRoute, packet:brPacket):
         
         self._send_to_route(route, brPacket().createNodeInfo(self.config))
 
-            
     def _process_basic_node_info(self, route: brRoute, packet: brPacket):
         
         config = packet.rebuildObject()
@@ -381,4 +403,32 @@ class Router:
     
     # ====================== Control Route ======================
     
+    def _process_control_news(self, route:brRoute, packet:brPacket):
+        news:dict = packet.rebuildObject()
+        if "endpoint" in news.keys():
+            endpointID = news["endpoint"]
+            logger.info(f"NEWS: ENDPOINT {endpointID} at {route.externalNode.localNodeID}")
+            if endpointID not in self.known_endpoints.keys():
+                self.known_endpoints[endpointID] = route.externalNode.localNodeID
     
+    def _send_friend_discovery(self, route:brRoute):
+        packet = brPacket().createAskForFriends()
+        self._send_to_route(route, packet)
+        
+    def _send_friend_announce(self, route: brRoute):
+        active_controls = self.fetch_all_control_routes()
+        for control in active_controls:
+            if control.externalNode.localNodeID != route.routeID:
+                pair = (control.assignedConn.ip, control.assignedConn.port)
+                packet = brPacket().createAnnounceFriend(pair)
+                self._send_to_route(route, packet)
+            
+    def _process_friend_announce(self, route: brRoute, packet: brPacket):
+        address:tuple = packet.rebuildObject()
+        if address not in self.suggested_connections:
+            self.suggested_connections.append(address)
+            
+    def _broadcast_new_endpoint(self, endpoint:brEndpoint):
+        news = {'endpoint': str(endpoint.endpoint_uuid)}
+        all_controls = self.fetch_all_control_routes()
+        self._broadcast_to_routes(all_controls, brPacket().createNews(news))

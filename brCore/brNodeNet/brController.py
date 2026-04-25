@@ -61,6 +61,7 @@ class brNodeServer:
         self.dht_queue = Queue(maxsize=10000)
         self.connection_manager = ConnectionManager(secureEnclave, self.event_queue)
         
+        self.activeNodes:list[brNode] = []
         self.knownNodes:list[brNode] = []
         self.dhtResponses:dict[str][DHTRequest] = {}
         self.router = Router(self.uuid, self.secureEnclave, self.dht, self.event_queue, self.connection_manager)
@@ -147,7 +148,7 @@ class brNodeServer:
         elif event.event_type == EventType.NEW_ENDPOINT_CLIENT:
             self.router.handle_new_endpoint(event.endPoint)
         elif event.event_type == EventType.ENDPOINT_REQUEST:
-            pass
+            self._handle_endpoint_request(event)
         elif event.event_type == EventType.DHT_REQUEST:
             self._handle_DHT_response()
     
@@ -162,15 +163,19 @@ class brNodeServer:
             route.setDestinations(origin=self.uuid, destination=f'{route.externalNode.localNodeID} (unconfirmed)')
             self.router.initiate_handshake(route)
         else:
-            pass
             route.setDestinations(origin=f'{route.externalNode.localNodeID} (unconfirmed)', destination=self.uuid)
     
     def _submit_known_node(self, route:brRoute):
-        self.knownNodes.append(route.externalNode)
-        if len(self.knownNodes) == 1:
+        
+        for node in self.activeNodes:
+            if str(route.externalNode.localNodeID) == node.localNodeID:
+                return
+        
+        self.activeNodes.append(route.externalNode)
+        if len(self.activeNodes) == 1:
             self.router.negotiate_control_route(route)
             logger.info("No other nodes connected, automatically attempting to upgrade route to CONTROL.")
-        if len(self.knownNodes) > 0 and len(self.dht.dhtServer.bootstrappable_neighbors()) == 0:
+        if len(self.activeNodes) > 0 and len(self.dht.dhtServer.bootstrappable_neighbors()) == 0:
             self.dht.setBootstrapList([(route.externalNode.nodeIP, route.externalNode.dhtport)])
             logging.info("Just bootstrapped the DHT network.")
     
@@ -190,7 +195,31 @@ class brNodeServer:
         
         # Put the request into the ConnectionManager's dedicated queue
         self.connection_manager.connect_request_queue.put(route)
+        
+    def connect_to_node_make_reserved(self, node:brNode, dest_id:str):
+        route = brRoute(
+            routeType=brRoute.brRouteType.TEST,
+            externalNode=node,
+            connectionType=brRoute.brConnectionDirection.INITIATED,
+            destinationID=dest_id
+        )
+        self.connection_manager.connect_request_queue.put(route)
 
+    # Endpoint logic
+    #
+    
+    def _handle_endpoint_request(self, event:EndPointEvent):
+        
+        event.endPoint.searching_for_target = True
+        
+        # Endpoint requests a target
+        if self.router.isEndpointTargetLocal(event.endPoint.endpoint_uuid):
+            pass
+        elif self.router.isEndpointTargetClose(event.endPoint.endpoint_uuid):
+            pass
+            
+        
+    
     # Tasks
     # 
     def _local_dht_ttl_cleanup(self):
@@ -229,9 +258,9 @@ class brNodeServer:
             self.dht_query.publish(endpoint.endpoint_uuid, str(self.uuid), typestr="endpoint")
             
         known = []
-        for node in self.knownNodes:
+        for node in self.activeNodes:
             known.append(str(node.localNodeID)) 
-        self.dht_query.publish(self.uuid, json.dumps(known), typestr="knownnodes")
+        self.dht_query.publish(self.uuid, json.dumps(known), typestr="activenodes")
         
         for route in self.router.active_routes:
             self.dht_query.publish(route.routeID, "route")
@@ -244,14 +273,18 @@ class brNodeServer:
         # Evaluate test routes
         
         control_routes_active = self.router.fetch_all_control_routes()
+        test_routes_active = self.router.fetch_all_test_routes()
         
-        logger.info(f'Controller has {len(control_routes_active)} active controls')
+        for route in test_routes_active:
+            route:brRoute
+            if control_routes_active < self.max_control_routes:
+                self.router.initiate_handshake(route)
+                return
         
-        #for route in self.router.fetch_all_test_routes():
-        #    route:brRoute
-        #    if control_routes_active < self.max_control_routes:
-        #        logger.info("TEST: C")
-    
+        if control_routes_active < self.max_control_routes:
+            for route in control_routes_active:
+                self.router._send_friend_discovery(route)
+            
     def _controller_read_news(self):
         all_control_routes = self.router.fetch_all_control_routes()
         logger.info(f"Controller has {len(all_control_routes)} control routes.")

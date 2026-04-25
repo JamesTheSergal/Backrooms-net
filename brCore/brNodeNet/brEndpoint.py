@@ -17,7 +17,7 @@ logger = brNodeCoreLog
 @dataclass
 class brEndpoint:
     endpoint_uuid: uuid.UUID = field(default_factory=uuid.uuid4)
-    requested_target: uuid.UUID = None
+    requested_target: str = None
     searching_for_target: bool = False
     requested_route_type: brRoute.brRouteType = None
     provided_route: brRoute = None
@@ -49,3 +49,7 @@ class brEndpoint:
     def addPublicKey(self, public_key_str):
         self.identity = Identity().newIdentFromPubImport(public_key_str)
         logger.info(f'Endpoint {self.endpoint_uuid} just confirmed their identity')
+        
+    def requestTarget(self, endpointid:str):
+        self.requested_target = endpointid
+        

@@ -108,6 +108,9 @@ class brPacket:
         READY_MESSAGE = 14  # Response that we are ready to receive sequence
         MESSAGE = 15        # Data to receive
         
+        # Route Building
+        SET_DESTINATION = 15 # Packet where the destination pre-deturmined at connection
+        
         
    
     def __init__(self, receivedPacket:bytes=None) -> None:
@@ -282,13 +285,7 @@ class brPacket:
         return self.setMessageType(brPacket.brMessageType.READY)
     
     def createEncrComms(self):
-        """Build empty READY packet to acknowledge handshake.
-
-        Returns:
-            bytes: Ready-to-send packet.
-        """
         return self.setMessageType(brPacket.brMessageType.ENCR_COMMS)
-    
     
     def createCallbackPing(self):
         """Build empty CALLBACK_PING packet for latency/response window.
@@ -297,7 +294,6 @@ class brPacket:
             bytes: Ready-to-send packet.
         """
         return self.setMessageType(brPacket.brMessageType.CALLBACK_PING)
-    
     
     def createNodeInfo(self, message):
         """Build NODE_INFO packet with pickled node details.
@@ -309,3 +305,15 @@ class brPacket:
             bytes: Ready-to-send packet.
         """
         return self.insertObject(message).setMessageType(brPacket.brMessageType.NODE_INFO)
+
+    def createAskForFriends(self):
+        return self.setMessageType(brPacket.brMessageType.ASK_FOR_FRIENDS)
+    
+    def createAnnounceFriend(self, pair:tuple):
+        return self.setMessageType(brPacket.brMessageType.FRIEND_ANNOUNCE).insertObject(pair)
+    
+    def createNews(self, news:dict):
+        return self.setMessageType(brPacket.brMessageType.NEWS).insertObject(news)
+    
+    def createPredeturminedDestination(self, destination:str):
+        return self.setMessageType(brPacket.brMessageType.SET_DESTINATION).insertObject(destination)
