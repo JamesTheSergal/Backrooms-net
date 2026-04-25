@@ -5,6 +5,7 @@ import socket
 import time
 from typing import Optional
 import uuid
+from dataclasses import dataclass, field
 from kademlia.network import Server
 from threading import Thread
 import logging
@@ -182,6 +183,7 @@ class brDHT:
                 request:DHTRequest = self.outbox.get()
                 await self.dhtServer.set(request.key, request.value)
                 log.info(f"DHT: Sent key: {request.key}")
+                await asyncio.sleep(1)
             else:
                 await asyncio.sleep(1)
                 
@@ -283,5 +285,16 @@ class brDHTQueryHelper:
                 
         return results[:max_results]
     
-    def publish(self, key:str, data, typestr:str=None, subtype:str=None):
-        pass
+    def create_key(self, key:str, typestr:str="", subtype:str=""):
+        if typestr != "":
+            typestr = "_" + typestr
+        
+        if subtype != "":
+            subtype = subtype + "_"
+            
+        return f'{subtype}{key}{typestr}'
+    
+    def publish(self, key:str, data, typestr:str="", subtype:str=""):
+        key = self.create_key(key, typestr, subtype)
+        self.dht.set(key, data)
+    
