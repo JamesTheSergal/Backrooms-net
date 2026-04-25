@@ -25,11 +25,12 @@ class Router:
     NetworkEvent it receives.
     """
     
-    def __init__(self, secure_enclave: Enclave, dht: brDHT, event_queue: Queue, connection_manager: ConnectionManager):
+    def __init__(self, controller_uuid, secure_enclave: Enclave, dht: brDHT, event_queue: Queue, connection_manager: ConnectionManager):
         self.secure_enclave = secure_enclave
         self.dht = dht
         self.event_queue = event_queue
         self.connection_manager = connection_manager
+        self.controller_uuid = controller_uuid
         self.config = None
         
         # You can keep a local reference to active routes, or let the 
@@ -72,8 +73,12 @@ class Router:
             brPacket.brMessageType.CHALLENGE_RES,
             brPacket.brMessageType.ENCR_COMMS,
         ):
-            self._handle_handshake_messages(route, packet)
-            return
+            if route.externalNode.finishedBasicHandshake == False:
+                self._handle_basic_handshake_messages(route, packet)
+                return
+            elif route.externalNode.finishedBasicHandshake == True and route.externalNode.finishedHandshake == False:
+                self._handle_handshake_messages(route, packet)
+                return
 
         # === Route-type specific handling ===
         match route.routeType:
@@ -121,11 +126,26 @@ class Router:
     def handle_new_endpoint(self,endpoint:brEndpoint):
         if endpoint.session_secret not in self.active_endpoints.keys():
             self.active_endpoints[endpoint.session_secret] = endpoint
-            
             logger.info(f"New endpoint established: {endpoint.endpoint_uuid}")
 
     # ====================== Private Handlers ======================
 
+    def _handle_basic_handshake_messages(self, route: brRoute, packet: brPacket):
+        """
+        Contains the logic handling handshake messages at the basic handshake level.
+        """
+        msg_type = packet.messageType
+        
+        if msg_type == brPacket.brMessageType.INTRODUCE:
+            # Handle introduction from a new node
+            self._process_basic_introduce(route, packet)
+    
+        elif msg_type == brPacket.brMessageType.READY:
+            self._respond_to_basic_ready(route, packet)
+            
+        elif msg_type == brPacket.brMessageType.NODE_INFO:
+            self._process_basic_node_info(route, packet)
+            
     def _handle_handshake_messages(self, route: brRoute, packet: brPacket):
         """
         Contains the logic that used to live in __routerOld__.
@@ -151,16 +171,7 @@ class Router:
             self._process_node_info(route, packet)
             
         elif msg_type == brPacket.brMessageType.ENCR_COMMS:
-            if route.externalNode.finishedHandshake == False:
-                route.encryptionUpgraded = True
-                route.setHandShakeComplete()
-                reply = brPacket()
-                reply.setMessageType(brPacket.brMessageType.ENCR_COMMS)
-                self._send_to_route(route, reply)
-                logger.info(f"Encryption upgraded on route {route.routeID}")
-                # Optionally upgrade TEST -> CONTROL here
-                if route.routeType == brRoute.brRouteType.TEST:
-                    self.upgrade_route(route, brRoute.brRouteType.CONTROL)
+            self._encrypt_comms(route)              
 
     def _handle_test_route(self, route: brRoute, packet: brPacket):
         
@@ -180,6 +191,8 @@ class Router:
             self._send_friend_announce(route)
         elif packet.messageType == brPacket.brMessageType.FRIEND_ANNOUNCE:
             self._process_friend_announce(route, packet)
+        elif packet.messageType == brPacket.brMessageType.CALLBACK_PING:
+            pass
         # Add more control message types here
 
     def _handle_unencrypted_route(self, route: brRoute, packet: brPacket):
@@ -205,18 +218,12 @@ class Router:
     def upgrade_route(self, route: brRoute, new_type: brRoute.brRouteType):
         """Request a route type upgrade (e.g. TEST -> CONTROL)."""
         if route.routeType != new_type:
-            route.upgradeRouteType(new_type)
-            self.event_queue.put(NetworkEvent(
-                event_type=EventType.ROUTE_UPGRADE_REQUEST,
-                route=route
-            ))
-            logger.info(f"Requested upgrade of route {route.routeID} to {new_type.name}")
+            logger.info(f"Route ID {route.routeID} changed from {route.routeType.name} to {new_type.name}")
+            route.routeType = new_type
+            
 
-    def _send_to_route(self, route: brRoute, packet: brPacket, encrypt: bool = True):
+    def _send_to_route(self, route: brRoute, packet: brPacket):
         """Convenience method to queue a packet for sending."""
-        if not route or not route.outbox:
-            return False
-        
         if isinstance(packet, bytes):
             route.outbox.put(packet)
         else:
@@ -229,7 +236,7 @@ class Router:
     def _send_ping(self, route: brRoute):
         """Helper to send a callback ping."""
         ping = brPacket().createCallbackPing()
-        self._send_to_route(route, ping, encrypt=False)
+        self._send_to_route(route, ping)
 
     def fetch_all_control_routes(self):
         to_pass = []
@@ -245,6 +252,17 @@ class Router:
                 to_pass.append(active)
         return to_pass
     
+    def initiate_handshake(self, route: brRoute):
+        first_hello = brPacket()
+        first_hello.setMessageType(brPacket.brMessageType.INTRODUCE)
+        self._send_to_route(route, first_hello)
+        logger.info(f"We have initiated a basic connection handshake for route {route.routeID}")
+    
+    def negotiate_control_route(self, route: brRoute):
+        self._send_public_key(route)
+        self._send_to_route(route, brPacket().createSimpleHello())
+        logger.info(f"Attempting to negotiate a control route on route ID {route.routeID} with node {route.externalNode.localNodeID}")
+    
     def _send_public_key(self, route):
         response = brPacket().createNodeInfo(
                 {"public_key": self.secure_enclave.assignedIdentity.publicKey.save_pkcs1().decode("utf-8")}
@@ -252,34 +270,27 @@ class Router:
         self._send_to_route(route, response)
     
     def _apply_config_to_route(self, config:dict, route:brRoute):
-        route.externalNode.setNodeUUID(config["uuid"])
+        logger.info(f'Config Debug: {config}')
+        route.setExternalNodeID(config["uuid"])
         route.externalNode.dhtport = config["dhtport"]
         route.externalNode.webPort = config["webport"]
         route.externalNode.nodePort = config["nodeport"]
 
     
-    # ====================== Stub Methods (fill these in) ======================
+    # ====================== Main Handshake ======================
 
     def _process_introduce(self, route: brRoute, packet: brPacket):
         
-        # Apart of Basic Handshake
-        if route.externalNode.finishedBasicHandshake == False:
-            self._send_to_route(route, brPacket().createSimpleReady())
-        if route.externalNode.finishedBasicHandshake and route.externalNode.finishedHandshake == False:
-            self._send_public_key(route)
-            self._send_to_route(route, brPacket().createSimpleReady())
-            self.connection_manager.wait_until_outbox_clear(route)
-            route.encryptionUpgraded = True
+        self._send_public_key(route)
+        self._send_to_route(route, brPacket().createSimpleReady())
+        self.connection_manager.wait_until_outbox_clear(route)
+        route.encryptionUpgraded = True
 
     def _respond_to_ready(self, route: brRoute, packet:brPacket):
-        
-        # Apart of Basic Handshake
-        if route.externalNode.finishedBasicHandshake == False:
-            self._send_to_route(route, brPacket().createNodeInfo(self.config))
-        if route.externalNode.finishedBasicHandshake and route.externalNode.finishedHandshake == False:
-            self.connection_manager.wait_until_outbox_clear(route)
-            route.encryptionUpgraded = True
-            self._deploy_challenge(route)
+
+        self.connection_manager.wait_until_outbox_clear(route)
+        route.encryptionUpgraded = True
+        self._deploy_challenge(route)
             
     def _respond_to_challenge(self, route: brRoute, packet: brPacket):
         challenge_int = packet.rebuildObject()
@@ -303,55 +314,71 @@ class Router:
     
     def _process_node_info(self, route: brRoute, packet: brPacket):
         
-        # Apart of Basic Handshake
-        if route.externalNode.finishedBasicHandshake == False:
-            config = packet.rebuildObject()
-            self._apply_config_to_route(config, route)
-            self.active_routes.append(route)
-            route.setBasicHandShakeComplete()
-            # Send Node info back to peer to complete handshake on their end.
-            if not route.connectionType == brRoute.brConnectionDirection.INITIATED:
-                route.connectingTo = f'{route.externalNode.localNodeID}'
-                self._send_to_route(route, brPacket().createNodeInfo(self.config))
-                route.externalNode.finishedBasicHandshake = True
-                logger.info(f"Completed basic handshake on route {route.routeID}")
-            else:
-                route.connectingFrom = f'{route.externalNode.localNodeID}'
-                route.externalNode.finishedBasicHandshake = True
-                logger.info(f"Completed basic handshake on route {route.routeID}")
-                
-            self.event_queue.put(NetworkEvent(EventType.SUBMIT_KNOWN_NODE, route))
-            
-        if route.externalNode.finishedBasicHandshake and route.externalNode.finishedHandshake == False:
-            if packet.data is not None:
-                data_obj = packet.rebuildObject()
-                if isinstance(data_obj, dict):
-                    if "public_key" in data_obj.keys():
-                        logger.info(f"Received public key from {route.externalNode.localNodeID}")
-                        route.externalNode.identity = self.secure_enclave.assignedIdentity.newIdentFromPubImport(data_obj["public_key"])
-                        
-            
+        if packet.data is not None:
+            data_obj = packet.rebuildObject()
+            if isinstance(data_obj, dict):
+                if "public_key" in data_obj.keys():
+                    logger.info(f"Received public key from {route.externalNode.localNodeID}")
+                    route.externalNode.identity = self.secure_enclave.assignedIdentity.newIdentFromPubImport(data_obj["public_key"])
+                                 
     def _send_friend_announce(self, route: brRoute):
         logger.info("TODO: Send friend announce packet")
 
     def _process_friend_announce(self, route: brRoute, packet: brPacket):
-        logger.info("TODO: Process incoming friend announce")
+        logger.info("TODO: Process incoming friend announce")           
+    
+    def _encrypt_comms(self, route: brRoute):
+        route.encryptionUpgraded = True
+        route.setHandShakeComplete()
+        reply = brPacket().createEncrComms()
+        self._send_to_route(route, reply)
+        logger.info(f"Encryption upgraded on route {route.routeID}")
+        # Optionally upgrade TEST -> CONTROL here
+        self.upgrade_route(route, brRoute.brRouteType.CONTROL)
         
-    def _perform_route_upgrade(self, route: brRoute):
-        
-        if route.externalNode.finishedBasicHandshake and route.externalNode.finishedHandshake == False and route.connectionType == brRoute.brConnectionDirection.INITIATED:
-            logger.info(f"Route {route.routeID} upgrade request")
-            self._send_public_key(route)
-            self._send_to_route(route, brPacket().createSimpleHello())
-        elif route.externalNode.finishedBasicHandshake and route.externalNode.finishedHandshake:
-            if route.routeType == brRoute.brRouteType.TEST:
-                route.setRouteType(brRoute.brRouteType.CONTROL)
-            
-            
-        # Any post-upgrade logic can go here
 
-    # Route management
+   # ====================== Route Management ======================
+    
+    def add_active_route(self, route: brRoute):
+        self.active_routes.append(route)
+        logger.info(f"Route {route.routeID} is now active in mode: {route.routeType.name}")
     
     def make_route_inactive(self, route: brRoute):
-        pass
+        if route in self.active_routes:
+            self.active_routes.remove(route)
+            logger.info(f"Route {route.routeID} is now inactive.")
+    
+    # ====================== Basic Handshake Methods (fill these in) ======================
+    
+    def _process_basic_introduce(self, route: brRoute, packet: brPacket):
+
+        self._send_to_route(route, brPacket().createSimpleReady())
+
+            
+    def _respond_to_basic_ready(self, route: brRoute, packet:brPacket):
+        
+        self._send_to_route(route, brPacket().createNodeInfo(self.config))
+
+            
+    def _process_basic_node_info(self, route: brRoute, packet: brPacket):
+        
+        config = packet.rebuildObject()
+        self._apply_config_to_route(config, route)
+        self.add_active_route(route)
+        route.setBasicHandShakeComplete()
+        # Send Node info back to peer to complete handshake on their end.
+        if not route.connectionType == brRoute.brConnectionDirection.INITIATED:
+            route.setDestinations(origin=str(self.controller_uuid), destination=str(route.externalNode.localNodeID))
+            self._send_to_route(route, brPacket().createNodeInfo(self.config))
+            route.externalNode.finishedBasicHandshake = True
+            logger.info(f"Completed basic handshake on route {route.routeID}")
+        else:
+            route.setDestinations(origin=str(route.externalNode.localNodeID), destination=str(self.controller_uuid))
+            route.externalNode.finishedBasicHandshake = True
+            logger.info(f"Completed basic handshake on route {route.routeID}")
+            
+        self.event_queue.put(NetworkEvent(EventType.SUBMIT_KNOWN_NODE, route))
+    
+    # ====================== Control Route ======================
+    
     

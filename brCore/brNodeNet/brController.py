@@ -40,13 +40,21 @@ class brNodeServer:
         pass
 
     def __init__(self, secureEnclave:Enclave, dhtServer:brDHT, webport:int) -> None:
+        self.secureEnclave = secureEnclave
         
+        # Restore the UUID so that other nodes know who we are
+        if not self.secureEnclave.isEncKey("selfUUID"):
+            self.uuid = uuid.uuid4()
+            logger.info(f"Network controller new UUID is: {self.uuid}")
+            self.secureEnclave.insertData("selfUUID", self.uuid)
+        else:
+            self.uuid = self.secureEnclave.returnData("selfUUID")
+            
         # Settings
         self.node_port = random.randrange(13000, 14000) # For testing
         self.web_port = webport
         self.max_control_routes:int = 10
 
-        self.secureEnclave = secureEnclave
         self.dht = dhtServer
         self.dht_query = brDHTQueryHelper(dhtServer, secureEnclave)
         self.event_queue = Queue(maxsize=10000)
@@ -55,16 +63,19 @@ class brNodeServer:
         
         self.knownNodes:list[brNode] = []
         self.dhtResponses:dict[str][DHTRequest] = {}
-        self.router = Router(self.secureEnclave, self.dht, self.event_queue, self.connection_manager)
+        self.router = Router(self.uuid, self.secureEnclave, self.dht, self.event_queue, self.connection_manager)
         
         self.shutdown = False
         self.controller_thread = None
         self.total_events = 0
         
-        self.config = None
+        # Set basic handshake info object
+        self.config = {"uuid": self.uuid, "dhtport": self.dht.serverport, "webport": self.web_port, "nodeport": self.node_port}
+        self.router.config = self.config
         
-        # Network controller specific
-        self.uuid = None
+        
+        
+        
 
     def startServer(self):
         #result = configureUPNP(self.nodePort, "TCP", "Backrooms-net Node")
@@ -101,7 +112,6 @@ class brNodeServer:
     def _controller_loop(self):
         logger.info("Network controller started")
         self._initial_persistant_task_setup()
-        self._prestart()
         
         while not self.shutdown:
             try:
@@ -124,19 +134,6 @@ class brNodeServer:
         schedule.every(30).seconds.do(brNodeServer._controller_read_news, self)
         
     
-    def _prestart(self):
-        # Restore the UUID so that other nodes know who we are
-        if not self.secureEnclave.isEncKey("selfUUID"):
-            self.uuid = uuid.uuid4()
-            logger.info(f"Network controller new UUID is: {self.uuid}")
-            self.secureEnclave.insertData("selfUUID", self.uuid)
-        else:
-            self.uuid = self.secureEnclave.returnData("selfUUID")
-            
-        # Set basic handshake info object
-        self.config = {"uuid": self.uuid, "dhtport": self.dht.serverport, "webport": self.web_port, "nodeport": self.node_port}
-        self.router.config = self.config
-    
     def _handle_event(self, event: NetworkEvent):
         
         if event.event_type == EventType.CONNECTION_ESTABLISHED:
@@ -149,7 +146,7 @@ class brNodeServer:
             self._submit_known_node(event.route)
         elif event.event_type == EventType.NEW_ENDPOINT_CLIENT:
             self.router.handle_new_endpoint(event.endPoint)
-        elif event.event_type == EventType.ENDPOINT_REQUESTS_FIND_TARGET:
+        elif event.event_type == EventType.ENDPOINT_REQUEST:
             pass
         elif event.event_type == EventType.DHT_REQUEST:
             self._handle_DHT_response()
@@ -162,17 +159,16 @@ class brNodeServer:
     def _handle_new_connection(self, route: brRoute):
         # Decide if we need to run handshake
         if route.connectionType == brRoute.brConnectionDirection.INITIATED:
-            route.setDestinations(destination=f'{route.externalNode.localNodeID} (unconfirmed)', origin=self.uuid)
-            first_hello = brPacket()
-            first_hello.setMessageType(brPacket.brMessageType.INTRODUCE)
-            self.router._send_to_route(route, first_hello)
+            route.setDestinations(origin=self.uuid, destination=f'{route.externalNode.localNodeID} (unconfirmed)')
+            self.router.initiate_handshake(route)
         else:
-            route.setDestinations(destination=self.uuid, origin=f'{route.externalNode.localNodeID} (unconfirmed)')
+            pass
+            route.setDestinations(origin=f'{route.externalNode.localNodeID} (unconfirmed)', destination=self.uuid)
     
     def _submit_known_node(self, route:brRoute):
         self.knownNodes.append(route.externalNode)
-        if len(self.knownNodes) == 0:
-            self.router._perform_route_upgrade(route)
+        if len(self.knownNodes) == 1:
+            self.router.negotiate_control_route(route)
             logger.info("No other nodes connected, automatically attempting to upgrade route to CONTROL.")
         if len(self.knownNodes) > 0 and len(self.dht.dhtServer.bootstrappable_neighbors()) == 0:
             self.dht.setBootstrapList([(route.externalNode.nodeIP, route.externalNode.dhtport)])
@@ -220,7 +216,7 @@ class brNodeServer:
             
         # Refresh node info
         self.dht_query.publish(self.uuid, "node")
-        self.dht_query.publish(self.uuid, self.secureEnclave.assignedIdentity.publicKey.save_pkcs1(), "pubkey")
+        self.dht_query.publish(self.uuid, self.secureEnclave.assignedIdentity.publicKey.save_pkcs1().decode("utf-8"), "pubkey")
         self.dht_query.publish(self.uuid, self.web_port, "webport")
         self.dht_query.publish(self.uuid, self.node_port, "nodeport")
         self.dht_query.publish(self.uuid, self.dht.serverport, "dhtport")
@@ -230,27 +226,26 @@ class brNodeServer:
         for endpoint_key in self.router.active_endpoints.keys():
             endpoint:brEndpoint = self.router.active_endpoints[endpoint_key]
             self.dht_query.publish(endpoint.endpoint_uuid, "endpoint")
-            self.dht_query.publish(endpoint.endpoint_uuid, self.uuid, typestr="endpoint")
+            self.dht_query.publish(endpoint.endpoint_uuid, str(self.uuid), typestr="endpoint")
             
         known = []
         for node in self.knownNodes:
-            known.append(node.localNodeID) 
+            known.append(str(node.localNodeID)) 
         self.dht_query.publish(self.uuid, json.dumps(known), typestr="knownnodes")
         
         for route in self.router.active_routes:
             self.dht_query.publish(route.routeID, "route")
-            self.dht_query.publish(route.routeID, route.connectingFrom, "origin")
-            self.dht_query.publish(route.routeID, route.connectingTo, "destination")
+            self.dht_query.publish(route.routeID, route.originID, "origin")
+            self.dht_query.publish(route.routeID, route.destinationID, "destination")
             self.dht_query.publish(route.routeID, route.routeType.name, "type")
             
-    
     def _eval_control_cons(self):
         
         # Evaluate test routes
         
         control_routes_active = self.router.fetch_all_control_routes()
         
-        logger.info(f'Controller has {control_routes_active} active controls')
+        logger.info(f'Controller has {len(control_routes_active)} active controls')
         
         #for route in self.router.fetch_all_test_routes():
         #    route:brRoute
