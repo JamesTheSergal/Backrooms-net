@@ -14,7 +14,7 @@ from brCore.brEnclave import Enclave
 from . import loggingfactory
 from ..upnphelper import configureUPNP, removeUPNP
 
-from ..brNodeNet.events import DHTRequest
+from ..brNodeNet.events import DHTRequest, EventType
 
 log = loggingfactory.getDefaultLogger()
 
@@ -124,7 +124,7 @@ class brDHT:
     
     def set(self, key: str, value: any):
         """Fire-and-forget set. Returns immediately."""
-        request = DHTRequest(key=key, value=value)
+        request = DHTRequest(event_type=EventType.DHT_REQUEST, key=key, value=value)
         self.outbox.put(request)                    # Reuse your existing queue
 
 
@@ -140,7 +140,7 @@ class brDHT:
         if request_id is None:
             request_id = str(uuid.uuid4())
             
-        request = DHTRequest(key=key, request_id=request_id)
+        request = DHTRequest(event_type=EventType.DHT_REQUEST, key=key, request_id=request_id)
         self.requestbox.put(request)                # Reuse your existing queue
         return None                                 # Caller should listen for event
 
