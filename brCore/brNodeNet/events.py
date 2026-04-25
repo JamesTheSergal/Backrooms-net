@@ -13,17 +13,16 @@ class EventType(IntEnum):
     CONNECTION_CLOSED = 1
     HANDSHAKE_COMPLETE = 2
     PACKET_RECEIVED = 3
-    ROUTE_UPGRADE_REQUEST = 4
-    SUBMIT_KNOWN_NODE = 5
-    DHT_REQUEST = 6
+    SUBMIT_KNOWN_NODE = 4
+    DHT_REQUEST = 5
     
     # External news triggered
-    PEER_ENDPOINT = 7
-    PEER_NODE = 8
+    PEER_ENDPOINT = 6
+    PEER_NODE = 7
     
     # Endpoint stuff
     NEW_ENDPOINT_CLIENT = 100
-    ENDPOINT_REQUESTS_FIND_TARGET = 101
+    ENDPOINT_REQUEST = 101
     
     # Add more as needed: DHT_BOOTSTRAP_NEEDED, etc.
 
